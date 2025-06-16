@@ -1,97 +1,64 @@
-# Azure TUI Project Plan
+# Project Plan: Azure TUI/CLI (aztui)
 
-## Vision
-A modern, user-friendly TUI and CLI for managing Azure environments, subscriptions, tenants, and resources, with advanced features like VM login, configuration management, usage/alarms, and AI-powered insights (OpenAI Copilot compatible).
+## Overview
 
----
-
-## Core Features
-
-### 1. Azure Authentication & Context
-
-- [x] List all Azure subscriptions and tenants using Azure CLI
-- [x] Switch between subscriptions and tenants in the TUI
-- [x] Set active subscription/tenant (Enter key)
-- [x] Show current active context in the UI
-
-### 2. Profile & Environment Management
-
-- [ ] Support multiple Azure CLI profiles
-- [ ] Save/load custom environment sets
-
-### 3. Resource Dashboard (TUI & CLI)
-
-- [x] List resource groups and resources for selected subscription/tenant
-- [x] Show resource status and details
-- [x] Modular resource management (AKS, Key Vault, VNet, Firewall, Storage, ACR, ACI, SQL, etc.)
-- [ ] Add, delete, and update resources interactively
-- [ ] Print usage matrix and alarms for all resources
-- [ ] Proactive health checks and recommendations
-
-### 4. VM & Resource Actions
-
-- [ ] SSH login to VMs from TUI/CLI
-- [ ] Start/stop/reboot VMs
-- [x] AKS: List, create (with prompt), delete, authenticate (get-credentials)
-- [ ] Key Vault: List, create, delete
-- [ ] Storage: List, create, delete
-- [ ] ACR: List, create, delete
-- [ ] ACI: List, create, delete
-- [ ] SQL: List, create, delete
-- [ ] VNet/Firewall: List, create, delete
-
-### 5. Usage, Alarms, and Monitoring
-
-- [x] Modular usage/alarms logic (internal/azure/usage.go)
-- [ ] Show usage matrix for all resources
-- [ ] List and manage alarms
-- [ ] Proactive recommendations and alerts
-
-### 6. Copilot/AI Integration
-
-- [x] Modular OpenAI/Copilot provider (internal/openai/ai.go)
-- [ ] Ask questions about environment, resources, and logs
-- [ ] Summarize, explain, and recommend actions
-- [ ] Integrate with TUI and CLI for context-aware Q&A
-
-### 7. Infrastructure as Code (Terraform/Bicep)
-
-- [x] Modular helpers for Terraform and Bicep (internal/azure/tfbicep.go)
-- [ ] Read, change, create, and delete resources via Terraform/Bicep
-- [ ] Generate code from TUI/CLI and AI suggestions
-
-### 8. CLI Interface
-
-- [ ] Expose all features via well-formed CLI commands
-- [ ] Support scripting and automation
-
-### 9. UI/UX Polish
-
-- [x] Modern, styled TUI with Bubble Tea & Lipgloss
-- [ ] Keyboard shortcuts and help screens
-- [ ] Error handling and loading indicators
+A modular Go TUI/CLI tool for managing Azure resources, supporting reading, listing, editing, and deploying Terraform/Bicep files and state, with AI-powered code generation, validation, and troubleshooting. The app uses standard az login/config for authentication, YAML config for naming and settings, and provides a modern, keyboard-driven TUI interface. All TUI functions are available via CLI, and AI always guides and confirms with the user.
 
 ---
 
-## Stretch Goals
+## Features
 
-- [ ] Multi-user collaboration
-- [ ] Plugin system for custom actions
-- [ ] Export/share environment configs
-- [ ] Advanced log analytics and visualization
+- Modular Azure resource logic (internal/azure/*)
+- Two-panel TUI layout with popups for logs/alarms
+- IaC file scanning (Terraform/Bicep/tfstate) and navigation
+- CLI flags for resource creation (`--create`) and deployment (`--deploy`), config-driven naming
+- YAML config loader (`internal/config/config.go`), sample config at `~/.config/azure-tui/config.yaml`
+- OpenAI/Copilot API integration with model selection, agent/role/prompt flexibility, Copilot tokens
+- Multiple Copilot agents for Azure scenarios: IaC, troubleshooting, security, cost, documentation, CLI help
+- Helper for scenario-driven agent selection
+- All features documented for TUI and CLI usage
+- Fallback/demo data for offline use
+- **Multi-tab and window support in TUI**: Create new tabs/windows for resource management, connections (AKS, VM), monitoring, health checks, etc., similar to tmux/zellij. Tabs can be opened/closed dynamically, supporting nested/multiple interfaces.
+- **Status line**: Persistent status bar at the bottom showing environment and connection status.
+- **Popup for shortcuts**: Keyboard shortcut popup for TUI navigation and actions.
 
 ---
 
-## Change Log
+## In Progress / Next Steps
 
-- 2025-06-16: Modular resource management, usage/alarms, and AI provider structure implemented. Interactive AKS, resource, and context management in TUI. CLI/TUI modularization started.
+- **AI-driven code generation, validation, troubleshooting**: Wire Copilot agents into resource creation and deployment workflows (TUI/CLI)
+- **Streaming/multi-turn context** for AI interactions
+- **Polish TUI/CLI UX**: error handling, progress, user guidance
+- **Config-driven customization**: agents, prompts, user scenarios
+- **In-place IaC editing and validation**
+- **Expand resource types and advanced actions** (SSH, advanced monitoring)
+- **Implement multi-tab/window TUI**: Add tab/window management, tabbed connections for AKS/VM, monitoring, health checks, and nested interfaces. Implement tab open/close logic and status line. Add popup for keyboard shortcuts.
 
 ---
 
-## Next Steps
+## File Map
 
-- Integrate more resource types into TUI/CLI (Key Vault, Storage, ACR, ACI, SQL, VNet, Firewall)
-- Add usage matrix and alarms to dashboard
-- Expose all features via CLI
-- Integrate AI provider for Q&A, log parsing, and code generation
-- Add Terraform/Bicep code generation and editing
+- `cmd/main.go`: TUI/CLI logic, resource loading, IaC panel, popups, CLI entry points
+- `internal/azure/tfbicep/filescan.go`, `tfbicep.go`: IaC file scanning, Terraform/Bicep helpers
+- `internal/config/config.go`: YAML config loader, naming standards
+- `internal/openai/openai.go`: OpenAI/Copilot integration, agent/role/prompt logic
+- `internal/tui/tui.go`: TUI logic, panels, popups, tab/window management (to be expanded)
+- `~/.config/azure-tui/config.yaml`: user config for naming, AI, etc.
+- `README.md`, `README-flake.md`, `project-plan.md`: user and dev documentation
+
+---
+
+## AI Integration
+
+- **Copilot agents**: Defined for IaC, troubleshooting, security, cost, documentation, CLI help
+- **Scenario-driven agent selection**: Helper function for mapping scenario to agent
+- **Configurable**: Model, API base, agent, and prompt can be set via config/env
+- **Usage**: All TUI/CLI workflows can invoke AI for code generation, validation, troubleshooting, and documentation
+
+---
+
+## Manual/Docs To Update
+
+- README.md: Add AI workflow usage, agent scenarios, config-driven customization, multi-tab/window TUI
+- README-flake.md: Nix/Flake usage, update for new config and AI features
+- project-plan.md: This file (updated)

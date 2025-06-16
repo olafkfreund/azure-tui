@@ -1,47 +1,49 @@
-# Azure TUI/CLI - Nix Flake Installation & Build Guide
+# Azure TUI/CLI (aztui) - Nix/Flake Manual
 
-This guide explains how to set up, build, and run the Azure TUI/CLI app using Nix Flakes for a fully reproducible development environment.
+## Nix/Flake Usage
 
-## Prerequisites
-- [Nix](https://nixos.org/download.html) (with flakes enabled)
-- Git
-
-## Quickstart
-
-```sh
-# Clone the repository
-$ git clone https://github.com/your-org/azure-tui.git
-$ cd azure-tui
-
-# Enter the Nix development shell (installs Go, Node, Azure CLI, etc.)
-$ nix develop
-
-# Build the app using Just or Go
-$ just           # (recommended, runs go build)
-# or
-$ go build -o aztui ./cmd/main.go
-
-# Run the app
-$ ./aztui
-```
-
-## Flake Features
-- **Reproducible Go/Node/Azure CLI dev environment**
-- **`nix develop`**: Drops you into a shell with all dependencies
-- **`nix build`**: Builds the app using Go modules
-- **`just`**: Provides common build/test commands
-
-## Example: Build and Run with Flakes
-```sh
-# Build the binary using Nix Flake
-$ nix build
-# The binary will be in ./result/bin/aztui
-$ ./result/bin/aztui
-```
-
-## Troubleshooting
-- If you see errors about missing flakes, ensure you have enabled flakes in your Nix config.
-- For Azure authentication, run `az login` before starting the app.
+- Build with flakes: `nix build`
+- Run with flakes: `nix run`
+- Development shell: `nix develop`
+- See `flake.nix` for details
 
 ---
-For more details, see the main README below.
+
+## Configuration
+
+- User config: `~/.config/azure-tui/config.yaml`
+- Set naming standards, AI model, Copilot token, agent selection, etc.
+- See `internal/config/config.go` for config structure
+
+---
+
+## AI Integration
+
+- **Copilot agents**: For IaC, troubleshooting, security, cost, documentation, CLI help
+- **Scenario-driven agent selection**: Helper function for mapping scenario to agent
+- **Configurable**: Model, API base, agent, and prompt can be set via config/env
+- **Usage**: All TUI/CLI workflows can invoke AI for code generation, validation, troubleshooting, and documentation
+
+---
+
+## Advanced Workflows
+
+- Use TUI or CLI for all resource actions
+- AI-powered code generation, validation, troubleshooting
+- In-place IaC editing and validation (coming soon)
+- Streaming/multi-turn AI context (coming soon)
+
+---
+
+## Roadmap
+
+- Full AI integration in resource workflows
+- More config-driven customization
+- Advanced resource actions (SSH, monitoring)
+
+---
+
+## See Also
+
+- [README.md](./README.md)
+- [project-plan.md](./project-plan.md)

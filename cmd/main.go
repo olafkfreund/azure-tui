@@ -15,6 +15,7 @@ import (
 
 	"github.com/olafkfreund/azure-tui/internal/azure/azuresdk"
 	"github.com/olafkfreund/azure-tui/internal/azure/tfbicep"
+	"github.com/olafkfreund/azure-tui/internal/tui"
 )
 
 // Azure SDK client for resource group listing
@@ -98,11 +99,23 @@ type iacFilesMsg []struct{ Path, Type string }
 type iacFilesErrMsg string
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "vnet-summary" {
-		subID := "<your-subscription-id>" // TODO: get from config or flag
-		resourceGroup := ""               // Optionally set
-		_ = listAndSummarizeVNetsCLI(subID, resourceGroup)
-		return
+	if len(os.Args) > 1 {
+		if os.Args[1] == "--create" {
+			// Example: aztui --create vm --name demo01 --folder ./iac
+			// TODO: Parse args, call AI provider to generate code, write file, print result
+			os.Exit(0)
+		}
+		if os.Args[1] == "--deploy" {
+			// Example: aztui --deploy ./iac/main.tf
+			// TODO: Run deployment, print output, call AI on error
+			os.Exit(0)
+		}
+		if os.Args[1] == "vnet-summary" {
+			subID := "<your-subscription-id>" // TODO: get from config or flag
+			resourceGroup := ""               // Optionally set
+			_ = listAndSummarizeVNetsCLI(subID, resourceGroup)
+			return
+		}
 	}
 	p := tea.NewProgram(initialModel())
 	if err := p.Start(); err != nil {
@@ -113,11 +126,13 @@ func main() {
 // initialModel returns the starting state for the TUI.
 func initialModel() tea.Model {
 	return &model{
-		profiles:       []string{"default"},
-		currentProfile: 0,
-		environments:   []string{"East US", "West Europe"},
-		currentEnv:     0,
-		loading:        true,
+		profiles:           []string{"default"},
+		currentProfile:     0,
+		environments:       []string{"East US", "West Europe"},
+		currentEnv:         0,
+		loading:            true,
+		tabManager:         tui.NewTabManager(),
+		showShortcutsPopup: false,
 	}
 }
 
@@ -210,6 +225,25 @@ type model struct {
 	// Add IaC file viewing popup state
 	showIacFilePopup    bool
 	iacFilePopupContent string
+
+	// Resource creation and deployment state
+	creatingResource     bool
+	createStep           int
+	createResourceType   string
+	createResourceName   string
+	createResourceFolder string
+	createResourceCode   string
+	createResourceVars   map[string]string
+	createAIMessage      string
+	showCreatePopup      bool
+	deployingResource    bool
+	deployOutput         string
+	showDeployPopup      bool
+	aiConfirmPending     bool
+	aiSuggestMessage     string
+
+	tabManager         *tui.TabManager // Multi-tab/window manager
+	showShortcutsPopup bool            // Show keyboard shortcuts popup
 }
 
 func (m *model) Init() tea.Cmd {
@@ -442,25 +476,26 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.aksLoading = true
 			return m, loadAKSClustersCmd()
 		case "K":
-			// Start interactive AKS creation prompt
-			m.promptingAKS = true
-			m.promptStep = 0
-			m.promptMsg = "Enter AKS cluster name:"
-			return m, nil
-		case "D":
-			// Delete selected AKS cluster
+			// Open AKS connection tab (simulate connection)
 			if len(m.aksClusters) > 0 {
-				go deleteAKSCluster(m.aksClusters[0].Name, m.aksClusters[0].ResourceGroup)
-				m.aksLoading = true
-				return m, loadAKSClustersCmd()
+				aks := m.aksClusters[0] // For demo, use first
+				title := fmt.Sprintf("AKS: %s", aks.Name)
+				content := fmt.Sprintf("Connected to AKS cluster: %s\nResource Group: %s\nLocation: %s", aks.Name, aks.ResourceGroup, aks.Location)
+				m.tabManager.AddTab(tui.Tab{Title: title, Content: content, Type: "aks", Meta: map[string]string{"name": aks.Name}, Closable: true})
 			}
-		case "v":
-			if m.showIacPanel && len(m.iacFiles) > 0 {
-				// Show IaC file content popup
-				m.showIacFilePopup = true
-				m.iacFilePopupContent = readFilePreview(m.iacFiles[m.selectedIacIdx].Path, 100)
-				return m, nil
+			return m, nil
+		case "ctrl+V":
+			// Open VM connection tab (simulate connection)
+			if len(m.resourcesInGroup) > 0 {
+				for _, r := range m.resourcesInGroup {
+					if r.Type == "Microsoft.Compute/virtualMachines" {
+						title := fmt.Sprintf("VM: %s", r.Name)
+						content := fmt.Sprintf("Connected to VM: %s\nResource ID: %s\nLocation: %s", r.Name, r.ID, r.Location)
+						m.tabManager.AddTab(tui.Tab{Title: title, Content: content, Type: "vm", Meta: map[string]string{"id": r.ID}, Closable: true})
+					}
+				}
 			}
+			return m, nil
 		case "V":
 			// Start interactive Key Vault creation prompt
 			m.promptingKeyVault = true
@@ -509,6 +544,9 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showAlarmsPopup = false
 			m.showIacPanel = false
 			m.showIacFilePopup = false
+			m.showCreatePopup = false
+			m.showDeployPopup = false
+			m.showShortcutsPopup = false
 			return m, nil
 		case "F":
 			// Prompt for directory to scan (for now, use current dir or last used)
@@ -527,6 +565,38 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.showIacPanel && len(m.iacFiles) > 0 {
 				m.selectedIacIdx = (m.selectedIacIdx - 1 + len(m.iacFiles)) % len(m.iacFiles)
 			}
+		case "c":
+			// Start resource creation workflow
+			m.creatingResource = true
+			m.createStep = 0
+			m.createAIMessage = "AI: What type of resource do you want to create? (e.g. vm, storage, vnet)"
+			m.showCreatePopup = true
+			return m, nil
+		case "y":
+			// Deploy selected IaC file
+			if m.showIacPanel && len(m.iacFiles) > 0 {
+				m.deployingResource = true
+				m.deployOutput = ""
+				m.showDeployPopup = true
+				go runIaCDeployment(m.iacFiles[m.selectedIacIdx].Path, m.iacFiles[m.selectedIacIdx].Type, m)
+				return m, nil
+			}
+		// --- Tab/Window and Shortcuts Popup ---
+		case "ctrl+t":
+			// Open a new tab (demo: blank tab, real: could prompt for type)
+			title := fmt.Sprintf("Tab %d", len(m.tabManager.Tabs)+1)
+			m.tabManager.AddTab(tui.Tab{Title: title, Content: "New tab opened.", Type: "blank", Closable: true})
+			return m, nil
+		case "ctrl+w":
+			// Close current tab
+			if len(m.tabManager.Tabs) > 0 {
+				m.tabManager.CloseTab(m.tabManager.ActiveIndex)
+			}
+			return m, nil
+		case "F1":
+			// Show shortcuts popup
+			m.showShortcutsPopup = true
+			return m, nil
 		}
 	}
 	return m, nil
@@ -559,6 +629,20 @@ func (m *model) View() string {
 		"tab: next subscription | shift+tab: next tenant | enter: set active | Subscription: " + sub + " | Tenant: " + tenant,
 	)
 	help := helpStyle.Render("Press q to quit. Use tab/shift+tab to switch. Enter to set active context.")
+
+	// Show shortcuts popup if needed
+	if m.showShortcutsPopup {
+		shortcuts := map[string]string{
+			"tab":       "Next tab",
+			"shift+tab": "Previous tab",
+			"ctrl+w":    "Close tab",
+			"ctrl+t":    "New tab",
+			"ctrl+q":    "Quit",
+			"F1":        "Show shortcuts",
+			// ...add more as needed...
+		}
+		return tui.RenderShortcutsPopup(shortcuts)
+	}
 
 	// Show IaC file popup if needed
 	if m.showIacFilePopup {
@@ -606,6 +690,18 @@ func (m *model) View() string {
 		}
 		help := helpStyle.Render("n: next | p: prev | F: scan | v: view file | esc: close IaC panel")
 		return title + "\n" + iacPanel + "\n" + help
+	}
+
+	// Show resource creation popup if needed
+	if m.showCreatePopup {
+		popup := lipgloss.NewStyle().Width(80).Height(16).Align(lipgloss.Center, lipgloss.Center).Border(lipgloss.RoundedBorder()).Render(m.createAIMessage)
+		return "\n\n" + popup + "\n\nPress esc to cancel."
+	}
+
+	// Show deployment popup if needed
+	if m.showDeployPopup {
+		popup := lipgloss.NewStyle().Width(90).Height(30).Align(lipgloss.Center, lipgloss.Center).Border(lipgloss.RoundedBorder()).Render(m.deployOutput)
+		return "\n\n" + popup + "\n\nPress esc to cancel deployment."
 	}
 
 	// Build left panel: resource list
@@ -1031,4 +1127,16 @@ func readFilePreview(path string, maxLines int) string {
 		return "Error reading file: " + err.Error()
 	}
 	return strings.Join(lines, "\n")
+}
+
+// Add runIaCDeployment helper (scaffold):
+func runIaCDeployment(path, typ string, m *model) {
+	// TODO: Run terraform or bicep deployment, stream output to m.deployOutput, update m.showDeployPopup
+	// On error, call AI provider to analyze and suggest fix
+}
+
+// Add config read for naming standards (scaffold):
+func getNamingStandard() string {
+	// TODO: Read from ~/.config/azure-tui/config.yaml
+	return "demo-{{type}}-{{name}}"
 }
