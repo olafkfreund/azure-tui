@@ -244,6 +244,12 @@ type model struct {
 	aiConfirmPending     bool
 	aiSuggestMessage     string
 
+	// Caching for responsiveness
+	resourceGroupsCache map[string][]ResourceGroup // subID -> groups
+	resourcesCache      map[string][]AzureResource // groupName -> resources
+	cacheTimestamp      time.Time
+	isLoading           bool
+
 	tabManager         *tui.TabManager // Multi-tab/window manager
 	showShortcutsPopup bool            // Show keyboard shortcuts popup
 }
@@ -275,12 +281,25 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.currentSub = 0
 		m.currentTenant = 0
 		// Load resources for the selected subscription
-		return m, loadResourcesCmd()
+		if len(m.subscriptions) > 0 {
+			return m, loadResourcesCmd(m.subscriptions[m.currentSub].ID)
+		}
+		return m, nil
 	case resourcesMsg:
 		m.resourceGroups = msg
+		m.isLoading = false
+		// Cache resource groups for the current subscription
+		if m.resourceGroupsCache == nil {
+			m.resourceGroupsCache = make(map[string][]ResourceGroup)
+		}
+		if len(m.subscriptions) > 0 {
+			subID := m.subscriptions[m.currentSub].ID
+			m.resourceGroupsCache[subID] = msg
+		}
 		return m, nil
 	case resourceLoadErrMsg:
 		m.resourceLoadErr = string(msg)
+		m.isLoading = false
 		return m, nil
 	case resourcesInGroupMsg:
 		if msg.groupName == m.selectedGroup {
@@ -336,7 +355,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loading = false
 		return m, nil
 	case tea.KeyMsg:
-		if m.loading {
+		if m.loading || m.isLoading {
 			return m, nil
 		}
 		if m.promptingAKS {
@@ -425,7 +444,18 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "tab":
 			m.currentSub = (m.currentSub + 1) % len(m.subscriptions)
-			return m, loadResourcesCmd()
+			if len(m.subscriptions) > 0 {
+				subID := m.subscriptions[m.currentSub].ID
+				if m.resourceGroupsCache != nil {
+					if groups, found := m.resourceGroupsCache[subID]; found && len(groups) > 0 {
+						m.resourceGroups = groups
+						return m, nil
+					}
+				}
+				m.isLoading = true
+				return m, loadResourcesCmd(subID)
+			}
+			return m, nil
 		case "shift+tab":
 			m.currentTenant = (m.currentTenant + 1) % len(m.tenants)
 		case "down":
@@ -461,7 +491,10 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedGroup = m.resourceGroups[m.resourceGroupIdx].Name
 				return m, loadResourcesInGroupCmd(m.selectedGroup)
 			}
-			return m, loadResourcesCmd()
+			if len(m.subscriptions) > 0 {
+				return m, loadResourcesCmd(m.subscriptions[m.currentSub].ID)
+			}
+			return m, nil
 		case "d":
 			// Show details for selected resource
 			if m.selectedResource != "" && m.resourceIdx < len(m.resourcesInGroup) {
@@ -583,6 +616,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				go runIaCDeployment(m.iacFiles[m.selectedIacIdx].Path, m.iacFiles[m.selectedIacIdx].Type, m)
 				return m, nil
 			}
+		case "r":
+			// Force refresh resource groups from Azure for current subscription
+			if len(m.subscriptions) > 0 {
+				subID := m.subscriptions[m.currentSub].ID
+				m.isLoading = true
+				return m, loadResourcesCmd(subID)
+			}
+			return m, nil
 		// --- Tab/Window and Shortcuts Popup ---
 		case "ctrl+t":
 			// Open a new tab (demo: blank tab, real: could prompt for type)
@@ -631,6 +672,11 @@ func (m *model) View() string {
 		"tab: next subscription | shift+tab: next tenant | enter: set active | Subscription: " + sub + " | Tenant: " + tenant,
 	)
 	help := helpStyle.Render("Press q to quit. Use tab/shift+tab to switch. Enter to set active context.")
+
+	// Show loading spinner if loading
+	if m.isLoading {
+		return title + "\n" + contextLine + "\n" + subtitle + "\n\n" + "Loading... Please wait.\n" + help
+	}
 
 	// If there are open tabs, render the tab UI instead of the main panels
 	if m.tabManager != nil && len(m.tabManager.Tabs) > 0 {
@@ -723,18 +769,30 @@ func (m *model) View() string {
 		for i, rg := range m.resourceGroups {
 			selected := "  "
 			if i == m.resourceGroupIdx {
-				selected = "> "
+				selected = "→ " // Arrow for selected
 			}
-			leftPanel += selected + rg.Name + " (" + rg.Location + ")\n"
+			icon := "📁"
+			leftPanel += fmt.Sprintf("%s%s %-24s %s\n", selected, icon, rg.Name, rg.Location)
 		}
 		if m.selectedGroup != "" && len(m.resourcesInGroup) > 0 {
 			leftPanel += "\nResources in '" + m.selectedGroup + "':\n"
 			for i, r := range m.resourcesInGroup {
 				selected := "  "
 				if i == m.resourceIdx {
-					selected = "> "
+					selected = "→ "
 				}
-				leftPanel += selected + r.Name + " [" + r.Type + "]\n"
+				var icon string
+				switch {
+				case strings.Contains(r.Type, "virtualMachines"):
+					icon = "🖥️"
+				case strings.Contains(r.Type, "keyVault"):
+					icon = "🔑"
+				case strings.Contains(r.Type, "storageAccounts"):
+					icon = "💾"
+				default:
+					icon = "📦"
+				}
+				leftPanel += fmt.Sprintf("%s%s %-24s [%s]\n", selected, icon, r.Name, r.Type)
 			}
 		}
 	}
@@ -772,7 +830,8 @@ func (m *model) View() string {
 		if i < len(rightLines) {
 			r = rightLines[i]
 		}
-		box.WriteString(fmt.Sprintf("│%-*s│%-*s│\n", boxWidth, l, boxWidth, r))
+		// Clean up trailing spaces and align
+		box.WriteString(fmt.Sprintf("│%-*s│%-*s│\n", boxWidth, strings.TrimRight(l, " "), boxWidth, strings.TrimRight(r, " ")))
 	}
 	box.WriteString("└" + strings.Repeat("─", boxWidth) + "┴" + strings.Repeat("─", boxWidth) + "┘\n")
 
@@ -810,10 +869,10 @@ func fetchAzureSubsAndTenants() ([]Subscription, []Tenant, error) {
 	return subs, tenants, nil
 }
 
-// loadResourcesCmd loads resource groups for the current subscription.
-func loadResourcesCmd() tea.Cmd {
+// loadResourcesCmd loads resource groups for the given subscription.
+func loadResourcesCmd(subID string) tea.Cmd {
 	return func() tea.Msg {
-		groups, err := fetchResourceGroups()
+		groups, err := fetchResourceGroups(subID)
 		if err != nil {
 			return resourceLoadErrMsg(err.Error())
 		}
@@ -822,8 +881,7 @@ func loadResourcesCmd() tea.Cmd {
 }
 
 // fetchResourceGroups uses Azure Go SDK via azuresdk.AzureClient to get resource groups for the current subscription.
-func fetchResourceGroups() ([]ResourceGroup, error) {
-	subID := "demo-sub" // fallback demo sub
+func fetchResourceGroups(subID string) ([]ResourceGroup, error) {
 	if azureClient == nil {
 		return []ResourceGroup{{Name: "DemoGroup", Location: "westeurope"}}, nil
 	}
