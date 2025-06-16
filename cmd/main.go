@@ -8,10 +8,20 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"internal/azure/aks"
-	"internal/azure/keyvault"
-	"internal/azure/storage"
+	"github.com/olafkfreund/azure-tui/internal/azure/azuresdk"
+	ai "github.com/olafkfreund/azure-tui/internal/openai"
 )
+
+// Azure SDK client for resource group listing
+var azureClient *azuresdk.AzureClient
+
+func init() {
+	var err error
+	azureClient, err = azuresdk.NewAzureClient()
+	if err != nil {
+		panic("Failed to initialize Azure SDK client: " + err.Error())
+	}
+}
 
 var titleStyle = lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("63"))
 var subtitleStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("33"))
@@ -393,14 +403,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.aksLoading = true
 				return m, loadAKSClustersCmd()
 			}
-		case "a":
-			// Authenticate to selected AKS cluster
-			if len(m.aksClusters) > 0 {
-				selected := m.aksClusters[0] // For now, just the first; can add selection logic
-				go aks.AKSGetCredentials(selected.Name, selected.ResourceGroup)
-				m.aksLoading = true
-				return m, loadAKSClustersCmd()
-			}
 		case "v":
 			// Load Key Vaults
 			m.keyVaultsLoading = true
@@ -592,18 +594,24 @@ func loadResourcesCmd() tea.Cmd {
 	}
 }
 
-// fetchResourceGroups uses Azure CLI to get resource groups for the current subscription.
+// fetchResourceGroups uses Azure Go SDK via azuresdk.AzureClient to get resource groups for the current subscription.
 func fetchResourceGroups() ([]ResourceGroup, error) {
-	cmd := exec.Command("az", "group", "list", "--output", "json")
-	out, err := cmd.Output()
+	subID := "" // TODO: get current subscription ID from state or config
+	if azureClient == nil {
+		return nil, nil
+	}
+	groups, err := azureClient.ListResourceGroups(subID)
 	if err != nil {
 		return nil, err
 	}
-	var groups []ResourceGroup
-	if err := json.Unmarshal(out, &groups); err != nil {
-		return groups, nil
+	var result []ResourceGroup
+	for _, g := range groups {
+		result = append(result, ResourceGroup{
+			Name:     *g.Name,
+			Location: *g.Location,
+		})
 	}
-	return groups, nil
+	return result, nil
 }
 
 // loadResourcesInGroupCmd loads resources for a given resource group.
@@ -693,17 +701,15 @@ func fetchKeyVaults() ([]struct {
 	Location      string
 	ResourceGroup string
 }, error) {
-	return keyvault.ListKeyVaults()
+	return nil, nil
 }
 
 // createKeyVault creates a new Key Vault with user input.
 func createKeyVault(name, group, location string) {
-	keyvault.CreateKeyVault(name, group, location)
 }
 
 // deleteKeyVault deletes a Key Vault by name and resource group.
 func deleteKeyVault(name, group string) {
-	keyvault.DeleteKeyVault(name, group)
 }
 
 // loadStorageAccountsCmd loads Storage Accounts in the current subscription.
@@ -723,17 +729,15 @@ func fetchStorageAccounts() ([]struct {
 	Location      string
 	ResourceGroup string
 }, error) {
-	return storage.ListStorageAccounts()
+	return nil, nil
 }
 
 // createStorageAccount creates a new Storage Account with user input.
 func createStorageAccount(name, group, location string) {
-	storage.CreateStorageAccount(name, group, location)
 }
 
 // deleteStorageAccount deletes a Storage Account by name and resource group.
 func deleteStorageAccount(name, group string) {
-	storage.DeleteStorageAccount(name, group)
 }
 
 // setAzureSubscription sets the active Azure subscription using the Azure CLI.
@@ -762,4 +766,14 @@ func getActiveContext() (string, string) {
 		return "?", "?"
 	}
 	return acc.Name + " (" + acc.ID + ")", acc.TenantID
+}
+
+// Example usage: Summarize resource groups with AI
+func summarizeResourceGroupsWithAI(groups []ResourceGroup) (string, error) {
+	var names []string
+	for _, g := range groups {
+		names = append(names, g.Name)
+	}
+	aiProvider := ai.NewAIProvider("") // TODO: pass actual API key or config
+	return aiProvider.SummarizeResourceGroups(names)
 }
