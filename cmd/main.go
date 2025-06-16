@@ -4,11 +4,16 @@ import (
 	"encoding/json"
 	"os"
 	"os/exec"
+	"strings"
 
+	"github.com/charmbracelet/bubbles/popup"
+	"github.com/charmbracelet/bubbles/table"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/olafkfreund/azure-tui/internal/azure/azuresdk"
+	"github.com/olafkfreund/azure-tui/internal/azure/usage"
 	ai "github.com/olafkfreund/azure-tui/internal/openai"
 )
 
@@ -88,6 +93,12 @@ type storageAccountsMsg []struct {
 type storageErrMsg string
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "vnet-summary" {
+		subID := "<your-subscription-id>" // TODO: get from config or flag
+		resourceGroup := ""               // Optionally set
+		_ = listAndSummarizeVNetsCLI(subID, resourceGroup)
+		return
+	}
 	p := tea.NewProgram(initialModel())
 	if err := p.Start(); err != nil {
 		os.Exit(1)
@@ -169,6 +180,15 @@ type model struct {
 	promptStorageRG   string
 	promptStorageLoc  string
 	promptStorageMsg  string
+
+	// Add advanced TUI features
+	usageMatrix     [][]string
+	usageHeaders    []string
+	alarms          []usage.Alarm
+	showMatrixPopup bool
+	showAlarmsPopup bool
+	matrixViewport  viewport.Model
+	alarmsViewport  viewport.Model
 }
 
 func (m *model) Init() tea.Cmd {
@@ -437,6 +457,23 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.storageLoading = true
 				return m, loadStorageAccountsCmd()
 			}
+		case "m":
+			// Show usage matrix popup
+			m.showMatrixPopup = true
+			m.matrixViewport = viewport.New(80, 20)
+			m.matrixViewport.SetContent(renderUsageMatrix(m.usageHeaders, m.usageMatrix))
+			return m, nil
+		case "A":
+			// Show alarms popup
+			m.showAlarmsPopup = true
+			m.alarmsViewport = viewport.New(80, 20)
+			m.alarmsViewport.SetContent(renderAlarms(m.alarms))
+			return m, nil
+		case "esc":
+			// Hide popups
+			m.showMatrixPopup = false
+			m.showAlarmsPopup = false
+			return m, nil
 		}
 	}
 	return m, nil
@@ -554,6 +591,13 @@ func (m *model) View() string {
 		for _, v := range m.storageAccounts {
 			storageList += "- " + v.Name + " (" + v.Location + ", RG: " + v.ResourceGroup + ")\n"
 		}
+	}
+	// Matrix and Alarms popups
+	if m.showMatrixPopup {
+		return popup.New().WithContent(m.matrixViewport.View()).View()
+	}
+	if m.showAlarmsPopup {
+		return popup.New().WithContent(m.alarmsViewport.View()).View()
 	}
 	return title + "\n" + contextLine + "\n" + subtitle + "\n\n" + rgList + "\n" + resList + "\n" + aksList + "\n" + keyVaultList + "\n" + storageList + "\n" + help
 }
@@ -776,4 +820,59 @@ func summarizeResourceGroupsWithAI(groups []ResourceGroup) (string, error) {
 	}
 	aiProvider := ai.NewAIProvider("") // TODO: pass actual API key or config
 	return aiProvider.SummarizeResourceGroups(names)
+}
+
+// Example CLI command: List and summarize virtual networks
+func listAndSummarizeVNetsCLI(subscriptionID, resourceGroup string) error {
+	netClient, err := azuresdk.NewNetworkClient()
+	if err != nil {
+		return err
+	}
+	vnets, err := netClient.ListVirtualNetworks(subscriptionID, resourceGroup)
+	if err != nil {
+		return err
+	}
+	var vnetNames []string
+	for _, v := range vnets {
+		if v.Name != nil {
+			vnetNames = append(vnetNames, *v.Name)
+		}
+	}
+	aiProvider := ai.NewAIProvider("") // TODO: pass actual API key or config
+	summary, err := aiProvider.Ask("Summarize these Azure VNets and suggest improvements:", strings.Join(vnetNames, ", "))
+	if err != nil {
+		return err
+	}
+	println("Virtual Networks:", strings.Join(vnetNames, ", "))
+	println("AI Summary:", summary)
+	return nil
+}
+
+// Render usage matrix
+func renderUsageMatrix(headers []string, matrix [][]string) string {
+	t := table.New(table.WithColumns(headers))
+	for _, row := range matrix {
+		t.AddRow(row...)
+	}
+	return t.View()
+}
+
+// Render alarms
+func renderAlarms(alarms []usage.Alarm) string {
+	var b strings.Builder
+	for _, a := range alarms {
+		b.WriteString(lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1")).Render(a.Name + ": " + a.Status))
+		b.WriteString("\n" + a.Details + "\n\n")
+	}
+	return b.String()
+}
+
+// AI-powered log error summarization
+func (m *model) summarizeResourceLogErrors(logs []string) string {
+	aiProvider := ai.NewAIProvider("") // TODO: pass actual API key
+	summary, err := aiProvider.Ask("Summarize and explain these Azure resource log errors. Suggest fixes:", strings.Join(logs, "\n"))
+	if err != nil {
+		return "AI error: " + err.Error()
+	}
+	return summary
 }
