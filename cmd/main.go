@@ -2,11 +2,13 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/table"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -630,6 +632,12 @@ func (m *model) View() string {
 	)
 	help := helpStyle.Render("Press q to quit. Use tab/shift+tab to switch. Enter to set active context.")
 
+	// If there are open tabs, render the tab UI instead of the main panels
+	if m.tabManager != nil && len(m.tabManager.Tabs) > 0 {
+		status := "Env: " + m.environments[m.currentEnv]
+		return tui.RenderTabs(m.tabManager, status)
+	}
+
 	// Show shortcuts popup if needed
 	if m.showShortcutsPopup {
 		shortcuts := map[string]string{
@@ -775,19 +783,25 @@ func (m *model) View() string {
 func fetchAzureSubsAndTenants() ([]Subscription, []Tenant, error) {
 	subs := []Subscription{}
 	tenants := []Tenant{}
-	// Try to get subscriptions from Azure CLI, but fallback to demo data if it fails
-	subCmd := exec.Command("az", "account", "list", "--output", "json")
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	// Try to get subscriptions from Azure CLI, but fallback to demo data if it fails or times out
+	subCmd := exec.CommandContext(ctx, "az", "account", "list", "--output", "json")
 	subOut, err := subCmd.Output()
-	if err == nil {
+	if err == nil && ctx.Err() == nil {
 		_ = json.Unmarshal(subOut, &subs)
 	}
 	if len(subs) == 0 {
 		subs = []Subscription{{ID: "demo-sub", Name: "Demo Subscription", TenantID: "demo-tenant", IsDefault: true}}
 	}
-	// Try to get tenants from Azure CLI, but fallback to demo data if it fails
-	tenantCmd := exec.Command("az", "account", "tenant", "list", "--output", "json")
+
+	// Try to get tenants from Azure CLI, but fallback to demo data if it fails or times out
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel2()
+	tenantCmd := exec.CommandContext(ctx2, "az", "account", "tenant", "list", "--output", "json")
 	tenantOut, err := tenantCmd.Output()
-	if err == nil {
+	if err == nil && ctx2.Err() == nil {
 		_ = json.Unmarshal(tenantOut, &tenants)
 	}
 	if len(tenants) == 0 {
