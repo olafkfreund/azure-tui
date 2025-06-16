@@ -21,6 +21,7 @@ A modular Go TUI/CLI tool for managing Azure resources, supporting reading, list
 - **Multi-tab and window support in TUI**: Create new tabs/windows for resource management, connections (AKS, VM), monitoring, health checks, etc., similar to tmux/zellij. Tabs can be opened/closed dynamically, supporting nested/multiple interfaces.
 - **Status line**: Persistent status bar at the bottom showing environment and connection status.
 - **Popup for shortcuts**: Keyboard shortcut popup for TUI navigation and actions.
+- **Resource/connection/monitoring tabs**: Actions for AKS, VM, monitoring, and health checks now open new tabs in the TUI, allowing parallel management and nested interfaces.
 
 ---
 
@@ -32,17 +33,17 @@ A modular Go TUI/CLI tool for managing Azure resources, supporting reading, list
 - **Config-driven customization**: agents, prompts, user scenarios
 - **In-place IaC editing and validation**
 - **Expand resource types and advanced actions** (SSH, advanced monitoring)
-- **Implement multi-tab/window TUI**: Add tab/window management, tabbed connections for AKS/VM, monitoring, health checks, and nested interfaces. Implement tab open/close logic and status line. Add popup for keyboard shortcuts.
+- **Implement multi-tab/window TUI**: Add tab/window management, tabbed connections for AKS/VM, monitoring, health checks, and nested interfaces. Implement tab open/close logic and status line. Add popup for keyboard shortcuts. **Resource/connection/monitoring actions are now wired to open new tabs.**
 
 ---
 
 ## File Map
 
-- `cmd/main.go`: TUI/CLI logic, resource loading, IaC panel, popups, CLI entry points
+- `cmd/main.go`: TUI/CLI logic, resource loading, IaC panel, popups, CLI entry points, tab/connection/monitoring logic
 - `internal/azure/tfbicep/filescan.go`, `tfbicep.go`: IaC file scanning, Terraform/Bicep helpers
 - `internal/config/config.go`: YAML config loader, naming standards
 - `internal/openai/openai.go`: OpenAI/Copilot integration, agent/role/prompt logic
-- `internal/tui/tui.go`: TUI logic, panels, popups, tab/window management (to be expanded)
+- `internal/tui/tui.go`: TUI logic, panels, popups, tab/window management
 - `~/.config/azure-tui/config.yaml`: user config for naming, AI, etc.
 - `README.md`, `README-flake.md`, `project-plan.md`: user and dev documentation
 
@@ -59,6 +60,6 @@ A modular Go TUI/CLI tool for managing Azure resources, supporting reading, list
 
 ## Manual/Docs To Update
 
-- README.md: Add AI workflow usage, agent scenarios, config-driven customization, multi-tab/window TUI
+- README.md: Add AI workflow usage, agent scenarios, config-driven customization, multi-tab/window TUI, and resource/connection/monitoring tab actions
 - README-flake.md: Nix/Flake usage, update for new config and AI features
 - project-plan.md: This file (updated)
