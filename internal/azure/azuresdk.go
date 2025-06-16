@@ -7,6 +7,9 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/resourcemanager/resources/armresources"
 )
 
+// This file is now obsolete. All Azure SDK logic has been moved to internal/azure/azuresdk/.
+// Please use the azuresdk package from internal/azure/azuresdk for Azure SDK operations.
+
 type AzureClient struct {
 	Cred *azidentity.DefaultAzureCredential
 }

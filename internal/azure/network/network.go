@@ -5,6 +5,7 @@ import (
 	"os/exec"
 	"strings"
 
+	ai "github.com/olafkfreund/azure-tui/internal/openai"
 	"github.com/olafkfreund/azure-tui/internal/tui"
 )
 
@@ -129,7 +130,7 @@ func ExampleShowVNetAISummary() string {
 	for _, v := range vnets {
 		names = append(names, v.Name)
 	}
-	aiProvider := openai.NewAIProvider("") // TODO: pass actual API key
+	aiProvider := ai.NewAIProvider("") // TODO: pass actual API key
 	summary, err := aiProvider.SummarizeResourceGroups(names)
 	if err != nil {
 		return tui.RenderPopup(tui.PopupMsg{
@@ -147,7 +148,7 @@ func ExampleShowVNetAISummary() string {
 
 // AI-powered log analysis for firewall errors
 func ExampleShowFirewallAILogAnalysis(logs []string) string {
-	aiProvider := openai.NewAIProvider("") // TODO: pass actual API key
+	aiProvider := ai.NewAIProvider("") // TODO: pass actual API key
 	prompt := "Analyze the following Azure Firewall logs for errors, alarms, and recommendations:\n" + strings.Join(logs, "\n")
 	result, err := aiProvider.Ask(prompt, "Azure Firewall Log Analysis")
 	if err != nil {
