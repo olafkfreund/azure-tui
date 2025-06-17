@@ -11,15 +11,36 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/olafkfreund/azure-tui/internal/azure/resourceactions"
+	"github.com/olafkfreund/azure-tui/internal/azure/resourcedetails"
 	"github.com/olafkfreund/azure-tui/internal/tui"
 )
 
-// Data structures
-type Subscription struct {
-	ID        string `json:"id"`
-	Name      string `json:"name"`
-	TenantID  string `json:"tenantId"`
-	IsDefault bool   `json:"isDefault"`
+// Gruvbox colors
+var (
+	bgDark      = lipgloss.Color("#282828")
+	bgMedium    = lipgloss.Color("#3c3836")
+	bgLight     = lipgloss.Color("#504945")
+	fgLight     = lipgloss.Color("#fbf1c7")
+	fgMedium    = lipgloss.Color("#ebdbb2")
+	colorBlue   = lipgloss.Color("#83a598")
+	colorGreen  = lipgloss.Color("#b8bb26")
+	colorRed    = lipgloss.Color("#fb4934")
+	colorYellow = lipgloss.Color("#fabd2f")
+	colorPurple = lipgloss.Color("#d3869b")
+	colorAqua   = lipgloss.Color("#8ec07c")
+	colorGray   = lipgloss.Color("#a89984")
+)
+
+type AzureResource struct {
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name"`
+	Type          string                 `json:"type"`
+	Location      string                 `json:"location"`
+	ResourceGroup string                 `json:"resourceGroup"`
+	Status        string                 `json:"status,omitempty"`
+	Tags          map[string]string      `json:"tags,omitempty"`
+	Properties    map[string]interface{} `json:"properties,omitempty"`
 }
 
 type ResourceGroup struct {
@@ -27,60 +48,47 @@ type ResourceGroup struct {
 	Location string `json:"location"`
 }
 
-type AzureResource struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	Location string `json:"location"`
+type Subscription struct {
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	TenantID  string `json:"tenantId"`
+	IsDefault bool   `json:"isDefault"`
 }
 
-// Message types
-type subscriptionsLoadedMsg struct {
-	subscriptions []Subscription
-}
-
-type subscriptionsErrorMsg struct {
-	error string
-}
-
-type resourceGroupsLoadedMsg struct {
-	groups []ResourceGroup
-}
-
-type resourceGroupsErrorMsg struct {
-	error string
-}
-
+// Messages
+type subscriptionsLoadedMsg struct{ subscriptions []Subscription }
+type resourceGroupsLoadedMsg struct{ groups []ResourceGroup }
 type resourcesInGroupMsg struct {
 	groupName string
 	resources []AzureResource
 }
-
-type resourcesInGroupErrMsg struct {
-	groupName string
-	error     string
+type resourceDetailsLoadedMsg struct {
+	resource AzureResource
+	details  *resourcedetails.ResourceDetails
 }
-
-type resourceDetailsMsg struct {
-	resourceName string
-	details      string
+type resourceActionMsg struct {
+	action   string
+	resource AzureResource
+	result   resourceactions.ActionResult
 }
+type errorMsg struct{ error string }
 
-// Model
 type model struct {
 	treeView         *tui.TreeView
-	tabManager       *tui.TabManager
 	statusBar        *tui.StatusBar
-	width            int
-	height           int
+	width, height    int
 	ready            bool
 	subscriptions    []Subscription
 	resourceGroups   []ResourceGroup
-	resourcesInGroup []AzureResource
-	loadingState     string // "subscriptions", "groups", "ready", "error"
+	allResources     []AzureResource
+	selectedResource *AzureResource
+	resourceDetails  *resourcedetails.ResourceDetails
+	loadingState     string
+	selectedPanel    int
+	actionInProgress bool
+	lastActionResult *resourceactions.ActionResult
 }
 
-// Azure data fetching functions
 func fetchSubscriptions() ([]Subscription, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -105,13 +113,9 @@ func fetchSubscriptions() ([]Subscription, error) {
 	var subscriptions []Subscription
 	for _, s := range azSubs {
 		subscriptions = append(subscriptions, Subscription{
-			ID:        s.ID,
-			Name:      s.Name,
-			TenantID:  s.TenantID,
-			IsDefault: s.IsDefault,
+			ID: s.ID, Name: s.Name, TenantID: s.TenantID, IsDefault: s.IsDefault,
 		})
 	}
-
 	return subscriptions, nil
 }
 
@@ -136,12 +140,8 @@ func fetchResourceGroups() ([]ResourceGroup, error) {
 
 	var groups []ResourceGroup
 	for _, g := range azGroups {
-		groups = append(groups, ResourceGroup{
-			Name:     g.Name,
-			Location: g.Location,
-		})
+		groups = append(groups, ResourceGroup{Name: g.Name, Location: g.Location})
 	}
-
 	return groups, nil
 }
 
@@ -149,20 +149,18 @@ func fetchResourcesInGroup(groupName string) ([]AzureResource, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	cmd := exec.CommandContext(ctx, "az", "resource", "list",
-		"--resource-group", groupName,
-		"--output", "json")
-
+	cmd := exec.CommandContext(ctx, "az", "resource", "list", "--resource-group", groupName, "--output", "json")
 	output, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch resources: %v", err)
 	}
 
 	var azResources []struct {
-		ID       string `json:"id"`
-		Name     string `json:"name"`
-		Type     string `json:"type"`
-		Location string `json:"location"`
+		ID       string            `json:"id"`
+		Name     string            `json:"name"`
+		Type     string            `json:"type"`
+		Location string            `json:"location"`
+		Tags     map[string]string `json:"tags"`
 	}
 
 	if err := json.Unmarshal(output, &azResources); err != nil {
@@ -171,46 +169,37 @@ func fetchResourcesInGroup(groupName string) ([]AzureResource, error) {
 
 	var resources []AzureResource
 	for _, r := range azResources {
-		resources = append(resources, AzureResource{
-			ID:       r.ID,
-			Name:     r.Name,
-			Type:     r.Type,
-			Location: r.Location,
-		})
-	}
+		resource := AzureResource{
+			ID: r.ID, Name: r.Name, Type: r.Type, Location: r.Location,
+			ResourceGroup: groupName, Tags: r.Tags,
+		}
 
+		if r.Type == "Microsoft.Compute/virtualMachines" {
+			if status, err := resourceactions.GetVMStatus(r.Name, groupName); err == nil {
+				resource.Status = status
+			}
+		}
+		resources = append(resources, resource)
+	}
 	return resources, nil
 }
 
-// Helper functions
-func extractResourceGroupFromID(resourceID string) string {
-	parts := strings.Split(resourceID, "/")
-	for i, part := range parts {
-		if part == "resourceGroups" && i+1 < len(parts) {
-			return parts[i+1]
-		}
-	}
-	return ""
-}
-
-// Commands
-func loadSubscriptionsCmd() tea.Cmd {
+func loadDataCmd() tea.Cmd {
 	return func() tea.Msg {
 		subs, err := fetchSubscriptions()
 		if err != nil {
-			return subscriptionsErrorMsg{error: err.Error()}
+			return errorMsg{error: err.Error()}
 		}
-		return subscriptionsLoadedMsg{subscriptions: subs}
-	}
-}
 
-func loadResourceGroupsCmd() tea.Cmd {
-	return func() tea.Msg {
 		groups, err := fetchResourceGroups()
 		if err != nil {
-			return resourceGroupsErrorMsg{error: err.Error()}
+			return errorMsg{error: err.Error()}
 		}
-		return resourceGroupsLoadedMsg{groups: groups}
+
+		return tea.Batch(
+			func() tea.Msg { return subscriptionsLoadedMsg{subscriptions: subs} },
+			func() tea.Msg { return resourceGroupsLoadedMsg{groups: groups} },
+		)()
 	}
 }
 
@@ -218,164 +207,82 @@ func loadResourcesInGroupCmd(groupName string) tea.Cmd {
 	return func() tea.Msg {
 		resources, err := fetchResourcesInGroup(groupName)
 		if err != nil {
-			return resourcesInGroupErrMsg{groupName, err.Error()}
+			return errorMsg{error: err.Error()}
 		}
-		return resourcesInGroupMsg{groupName, resources}
+		return resourcesInGroupMsg{groupName: groupName, resources: resources}
 	}
 }
 
-func (m *model) showResourceDetails(node *tui.TreeNode) tea.Cmd {
+func loadResourceDetailsCmd(resource AzureResource) tea.Cmd {
 	return func() tea.Msg {
-		if node.ResourceData == nil {
-			return resourceDetailsMsg{
-				resourceName: node.Name,
-				details:      "No resource data available",
-			}
+		details, err := resourcedetails.GetResourceDetails(resource.ID)
+		if err != nil {
+			return errorMsg{error: err.Error()}
 		}
-
-		// Extract resource information
-		if resource, ok := node.ResourceData.(AzureResource); ok {
-			resourceGroup := extractResourceGroupFromID(resource.ID)
-
-			details := fmt.Sprintf(`Resource Details:
-
-Name: %s
-Type: %s  
-Location: %s
-Resource Group: %s
-Resource ID: %s
-
-Press 'Tab' to switch tabs, 'q' to quit`,
-				resource.Name,
-				resource.Type,
-				resource.Location,
-				resourceGroup,
-				resource.ID)
-
-			return resourceDetailsMsg{
-				resourceName: resource.Name,
-				details:      details,
-			}
-		}
-
-		return resourceDetailsMsg{
-			resourceName: node.Name,
-			details:      "Unable to parse resource data",
-		}
+		return resourceDetailsLoadedMsg{resource: resource, details: details}
 	}
 }
 
-// Initialize model
+func executeResourceActionCmd(action string, resource AzureResource) tea.Cmd {
+	return func() tea.Msg {
+		var result resourceactions.ActionResult
+
+		switch action {
+		case "start":
+			if resource.Type == "Microsoft.Compute/virtualMachines" {
+				result = resourceactions.StartVM(resource.Name, resource.ResourceGroup)
+			}
+		case "stop":
+			if resource.Type == "Microsoft.Compute/virtualMachines" {
+				result = resourceactions.StopVM(resource.Name, resource.ResourceGroup)
+			}
+		case "restart":
+			if resource.Type == "Microsoft.Compute/virtualMachines" {
+				result = resourceactions.RestartVM(resource.Name, resource.ResourceGroup)
+			}
+		default:
+			result = resourceactions.ActionResult{Success: false, Message: "Unsupported action"}
+		}
+		return resourceActionMsg{action: action, resource: resource, result: result}
+	}
+}
+
 func initModel() model {
-	treeView := tui.NewTreeView()
-	tabManager := tui.NewTabManager()
-	statusBar := tui.CreatePowerlineStatusBar(80)
-
-	// Add a default tab
-	tabManager.AddTab(tui.Tab{
-		Title:    "Azure Resources",
-		Content:  "Welcome to Azure TUI\n\nLoading Azure data...",
-		Type:     "main",
-		Closable: false,
-	})
-
 	return model{
-		treeView:     treeView,
-		tabManager:   tabManager,
-		statusBar:    statusBar,
-		loadingState: "subscriptions",
+		treeView:      tui.NewTreeView(),
+		statusBar:     tui.CreatePowerlineStatusBar(80),
+		loadingState:  "loading",
+		selectedPanel: 0,
 	}
 }
 
-// BubbleTea methods
 func (m model) Init() tea.Cmd {
-	return tea.Batch(
-		loadSubscriptionsCmd(),
-		loadResourceGroupsCmd(),
-	)
+	return loadDataCmd()
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.ready = true
+		m.width, m.height, m.ready = msg.Width, msg.Height, true
 		if m.statusBar != nil {
 			m.statusBar.Width = msg.Width
 		}
-		return m, nil
 
 	case subscriptionsLoadedMsg:
 		m.subscriptions = msg.subscriptions
-		m.loadingState = "groups"
-		if m.tabManager != nil && len(m.tabManager.Tabs) > 0 {
-			m.tabManager.Tabs[0].Content = fmt.Sprintf("Azure TUI\n\n✅ Loaded %d subscriptions\n🔄 Loading resource groups...", len(msg.subscriptions))
-		}
-		return m, nil
-
-	case subscriptionsErrorMsg:
-		m.loadingState = "error"
-		if m.tabManager != nil && len(m.tabManager.Tabs) > 0 {
-			m.tabManager.Tabs[0].Content = fmt.Sprintf("Azure TUI\n\n❌ Failed to load subscriptions: %s", msg.error)
-		}
-		return m, nil
 
 	case resourceGroupsLoadedMsg:
 		m.resourceGroups = msg.groups
 		m.loadingState = "ready"
-
-		// Populate tree view with resource groups
 		if m.treeView != nil {
 			for _, group := range msg.groups {
 				groupNode := m.treeView.AddResourceGroup(group.Name, group.Location)
 				m.treeView.AddResource(groupNode, "Loading...", "placeholder", nil)
 			}
-			// Ensure first item is selected
 			m.treeView.EnsureSelection()
 		}
 
-		if m.tabManager != nil && len(m.tabManager.Tabs) > 0 {
-			selectedInfo := ""
-			if m.treeView != nil {
-				selectedNode := m.treeView.GetSelectedNode()
-				if selectedNode != nil {
-					selectedInfo = fmt.Sprintf("\nCurrent Selection: %s (%s)", selectedNode.Name, selectedNode.Type)
-				}
-			}
-
-			m.tabManager.Tabs[0].Content = fmt.Sprintf(`Azure TUI - Resource Explorer
-
-✅ Loaded %d subscriptions
-✅ Loaded %d resource groups%s
-
-📖 Navigation Help:
-• j/k or ↓/↑ arrows - Navigate up/down
-• Space - Expand/collapse resource group  
-• Enter - Expand group OR view resource details
-• Tab - Switch between tabs
-• r - Refresh data
-• q - Quit application
-
-🎯 Quick Start:
-1. Use j/k to navigate to a resource group
-2. Press Space or Enter to expand it
-3. Navigate to a resource and press Enter for details
-
-Current Status: Ready for navigation`, len(m.subscriptions), len(msg.groups), selectedInfo)
-		}
-		return m, nil
-
-	case resourceGroupsErrorMsg:
-		m.loadingState = "error"
-		if m.tabManager != nil && len(m.tabManager.Tabs) > 0 {
-			m.tabManager.Tabs[0].Content = fmt.Sprintf("Azure TUI\n\n❌ Failed to load resource groups: %s", msg.error)
-		}
-		return m, nil
-
 	case resourcesInGroupMsg:
-		m.resourcesInGroup = msg.resources
-		// Update tree view with actual resources
 		if m.treeView != nil {
 			for _, groupNode := range m.treeView.Root.Children {
 				if groupNode.Name == msg.groupName {
@@ -387,154 +294,283 @@ Current Status: Ready for navigation`, len(m.subscriptions), len(msg.groups), se
 				}
 			}
 		}
-		return m, nil
+		m.allResources = append(m.allResources, msg.resources...)
 
-	case resourcesInGroupErrMsg:
-		// Handle resource loading error - could show an error in the tab
-		return m, nil
+	case resourceDetailsLoadedMsg:
+		m.selectedResource = &msg.resource
+		m.resourceDetails = msg.details
 
-	case resourceDetailsMsg:
-		// Create a new tab with resource details
-		if m.tabManager != nil {
-			resourceTab := tui.Tab{
-				Title:    fmt.Sprintf("📦 %s", msg.resourceName),
-				Content:  msg.details,
-				Type:     "resource",
-				Closable: true,
-			}
-			m.tabManager.AddTab(resourceTab)
+	case resourceActionMsg:
+		m.actionInProgress = false
+		m.lastActionResult = &msg.result
+		if msg.result.Success && m.selectedResource != nil {
+			return m, loadResourceDetailsCmd(*m.selectedResource)
 		}
-		return m, nil
+
+	case errorMsg:
+		m.loadingState = "error"
 
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
+		case "tab":
+			m.selectedPanel = (m.selectedPanel + 1) % 2
 		case "j", "down":
-			if m.treeView != nil {
+			if m.selectedPanel == 0 && m.treeView != nil {
 				m.treeView.SelectNext()
 				m.treeView.EnsureSelection()
-			}
-			return m, nil
-		case "k", "up":
-			if m.treeView != nil {
-				m.treeView.SelectPrevious()
-				m.treeView.EnsureSelection()
-			}
-			return m, nil
-		case " ":
-			if m.treeView != nil {
-				selectedNode, expanded := m.treeView.ToggleExpansion()
-				if expanded && selectedNode != nil && selectedNode.Type == "group" {
-					return m, loadResourcesInGroupCmd(selectedNode.Name)
+				if selectedNode := m.treeView.GetSelectedNode(); selectedNode != nil && selectedNode.Type == "resource" {
+					if resource, ok := selectedNode.ResourceData.(AzureResource); ok {
+						return m, loadResourceDetailsCmd(resource)
+					}
 				}
 			}
-			return m, nil
-		case "enter":
-			if m.treeView != nil {
+		case "k", "up":
+			if m.selectedPanel == 0 && m.treeView != nil {
+				m.treeView.SelectPrevious()
+				m.treeView.EnsureSelection()
+				if selectedNode := m.treeView.GetSelectedNode(); selectedNode != nil && selectedNode.Type == "resource" {
+					if resource, ok := selectedNode.ResourceData.(AzureResource); ok {
+						return m, loadResourceDetailsCmd(resource)
+					}
+				}
+			}
+		case " ", "enter":
+			if m.selectedPanel == 0 && m.treeView != nil {
 				selectedNode := m.treeView.GetSelectedNode()
 				if selectedNode != nil {
 					switch selectedNode.Type {
 					case "group":
-						// Expand/collapse resource group
 						selectedNode.Expanded = !selectedNode.Expanded
 						if selectedNode.Expanded {
 							return m, loadResourcesInGroupCmd(selectedNode.Name)
 						}
 					case "resource":
-						// Show resource details in a new tab
-						return m, m.showResourceDetails(selectedNode)
+						if resource, ok := selectedNode.ResourceData.(AzureResource); ok {
+							return m, loadResourceDetailsCmd(resource)
+						}
 					}
 				}
 			}
-			return m, nil
+		case "s":
+			if m.selectedResource != nil && !m.actionInProgress {
+				m.actionInProgress = true
+				return m, executeResourceActionCmd("start", *m.selectedResource)
+			}
+		case "S":
+			if m.selectedResource != nil && !m.actionInProgress {
+				m.actionInProgress = true
+				return m, executeResourceActionCmd("stop", *m.selectedResource)
+			}
 		case "r":
-			return m, tea.Batch(loadSubscriptionsCmd(), loadResourceGroupsCmd())
-		case "tab":
-			if m.tabManager != nil {
-				m.tabManager.SwitchTab(1)
+			if m.selectedResource != nil && !m.actionInProgress {
+				m.actionInProgress = true
+				return m, executeResourceActionCmd("restart", *m.selectedResource)
+			} else {
+				return m, loadDataCmd()
 			}
-			return m, nil
-		case "shift+tab":
-			if m.tabManager != nil {
-				m.tabManager.SwitchTab(-1)
-			}
-			return m, nil
+		case "R":
+			return m, loadDataCmd()
 		}
 	}
-
 	return m, nil
 }
 
 func (m model) View() string {
 	if !m.ready {
-		return "Loading Azure TUI..."
+		return lipgloss.NewStyle().
+			Background(bgDark).
+			Foreground(fgLight).
+			Render("Loading Azure Dashboard...")
 	}
 
-	// Update status bar
+	// Status bar
 	if m.statusBar != nil {
 		m.statusBar.Segments = []tui.PowerlineSegment{}
-		m.statusBar.AddSegment("☁️ Azure TUI", lipgloss.Color("39"), lipgloss.Color("15"))
+		m.statusBar.AddSegment("☁️ Azure Dashboard", colorBlue, bgDark)
 
 		switch m.loadingState {
-		case "subscriptions":
-			m.statusBar.AddSegment("Loading Subscriptions", lipgloss.Color("11"), lipgloss.Color("0"))
-		case "groups":
-			m.statusBar.AddSegment("Loading Resource Groups", lipgloss.Color("11"), lipgloss.Color("0"))
+		case "loading":
+			m.statusBar.AddSegment("Loading", colorYellow, bgMedium)
 		case "ready":
-			m.statusBar.AddSegment(fmt.Sprintf("%d Groups", len(m.resourceGroups)), lipgloss.Color("10"), lipgloss.Color("0"))
-
-			// Show current selection
-			if m.treeView != nil {
-				selectedNode := m.treeView.GetSelectedNode()
-				if selectedNode != nil {
-					m.statusBar.AddSegment(fmt.Sprintf("Selected: %s", selectedNode.Name), lipgloss.Color("14"), lipgloss.Color("0"))
-				}
+			m.statusBar.AddSegment(fmt.Sprintf("%d Groups", len(m.resourceGroups)), colorGreen, bgMedium)
+			if m.selectedResource != nil {
+				m.statusBar.AddSegment(fmt.Sprintf("Selected: %s", m.selectedResource.Name), colorPurple, bgMedium)
 			}
 		case "error":
-			m.statusBar.AddSegment("Error", lipgloss.Color("9"), lipgloss.Color("15"))
+			m.statusBar.AddSegment("Error", colorRed, bgMedium)
 		}
 
-		// Add keyboard help
-		m.statusBar.AddSegment("j/k:Navigate Enter:Select q:Quit", lipgloss.Color("8"), lipgloss.Color("15"))
+		panelName := "Tree"
+		if m.selectedPanel == 1 {
+			panelName = "Details"
+		}
+		m.statusBar.AddSegment(fmt.Sprintf("Panel: %s", panelName), colorAqua, bgMedium)
+		m.statusBar.AddSegment("Tab:Switch s:Start S:Stop r:Restart R:Refresh q:Quit", colorGray, bgLight)
 	}
 
-	// Render tree view
+	// Two-panel layout - NO BORDERS AT ALL
+	leftWidth := m.width / 3
+	rightWidth := m.width - leftWidth
+
+	// Tree panel
 	treeContent := ""
 	if m.treeView != nil {
-		treeContent = m.treeView.RenderTreeView(m.width/3, m.height-3)
+		treeContent = m.treeView.RenderTreeView(leftWidth-4, m.height-2)
 	}
 
-	// Render tabs content
-	tabsContent := ""
-	if m.tabManager != nil {
-		tabsContent = tui.RenderTabs(m.tabManager, "Azure TUI")
+	leftBg := bgMedium
+	if m.selectedPanel == 0 {
+		leftBg = bgLight
 	}
 
-	// Join panels horizontally
-	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, treeContent, tabsContent)
+	leftPanel := lipgloss.NewStyle().
+		Width(leftWidth).
+		Background(leftBg).
+		Foreground(fgMedium).
+		Padding(1, 2).
+		Render(treeContent)
 
-	// Add status bar
+	// Details panel
+	rightContent := m.renderResourcePanel(rightWidth-4, m.height-2)
+
+	rightBg := bgMedium
+	if m.selectedPanel == 1 {
+		rightBg = bgLight
+	}
+
+	rightPanel := lipgloss.NewStyle().
+		Width(rightWidth).
+		Background(rightBg).
+		Foreground(fgMedium).
+		Padding(1, 2).
+		Render(rightContent)
+
+	// Join everything
 	statusBarContent := ""
 	if m.statusBar != nil {
 		statusBarContent = m.statusBar.RenderStatusBar()
 	}
 
-	// Join with status bar vertically
+	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
 	fullView := lipgloss.JoinVertical(lipgloss.Left, statusBarContent, mainContent)
 
-	return fullView
+	return lipgloss.NewStyle().Background(bgDark).Render(fullView)
+}
+
+func (m model) renderResourcePanel(width, height int) string {
+	if m.selectedResource == nil {
+		return m.renderWelcomePanel(width, height)
+	}
+	return m.renderResourceDetailsAndActions(width, height)
+}
+
+func (m model) renderWelcomePanel(width, height int) string {
+	content := `📊 Azure Resource Dashboard
+
+Welcome to Azure TUI Dashboard!
+
+🎯 Getting Started:
+1. Navigate through resource groups in the left panel
+2. Press Space/Enter to expand a resource group  
+3. Select a resource to view details and actions
+4. Use Tab to switch between panels
+
+🎮 Quick Actions:
+• s - Start resource (VMs)
+• S - Stop resource (VMs)
+• r - Restart resource (VMs)
+• R - Refresh all data
+• Tab - Switch panels
+• q - Quit
+
+💡 Select a resource from the left panel to see detailed information and available actions here.`
+
+	return content
+}
+
+func (m model) renderResourceDetailsAndActions(width, height int) string {
+	resource := m.selectedResource
+
+	content := fmt.Sprintf(`📦 Resource Details
+
+🏷️  Name: %s
+🏗️  Type: %s
+📍 Location: %s
+📁 Resource Group: %s
+🆔 Resource ID: %s`,
+		resource.Name, resource.Type, resource.Location, resource.ResourceGroup, resource.ID)
+
+	if resource.Status != "" {
+		statusColor := "🔴"
+		if strings.Contains(strings.ToLower(resource.Status), "running") {
+			statusColor = "🟢"
+		} else if strings.Contains(strings.ToLower(resource.Status), "deallocated") {
+			statusColor = "🟡"
+		}
+		content += fmt.Sprintf("\n⚡ Status: %s %s", statusColor, resource.Status)
+	}
+
+	if len(resource.Tags) > 0 {
+		content += "\n\n🏷️  Tags:"
+		for key, value := range resource.Tags {
+			content += fmt.Sprintf("\n   • %s: %s", key, value)
+		}
+	}
+
+	if resource.Type == "Microsoft.Compute/virtualMachines" {
+		content += "\n\n🎮 Available Actions:"
+		content += "\n   [s] Start VM"
+		content += "\n   [S] Stop VM"
+		content += "\n   [r] Restart VM"
+
+		if m.actionInProgress {
+			content += "\n\n⏳ Action in progress..."
+		}
+
+		if m.lastActionResult != nil {
+			status := "❌"
+			if m.lastActionResult.Success {
+				status = "✅"
+			}
+			content += fmt.Sprintf("\n\n%s Last Action: %s", status, m.lastActionResult.Message)
+		}
+	}
+
+	if m.resourceDetails != nil {
+		content += "\n\n📋 Additional Properties:"
+		content += fmt.Sprintf("\n   • ID: %s", m.resourceDetails.ID)
+		content += fmt.Sprintf("\n   • Type: %s", m.resourceDetails.Type)
+		content += fmt.Sprintf("\n   • Location: %s", m.resourceDetails.Location)
+		content += fmt.Sprintf("\n   • Resource Group: %s", m.resourceDetails.ResourceGroup)
+
+		if m.resourceDetails.Status != "" {
+			content += fmt.Sprintf("\n   • Status: %s", m.resourceDetails.Status)
+		}
+
+		if len(m.resourceDetails.Tags) > 0 {
+			content += "\n\n🏷️  Additional Tags:"
+			for key, value := range m.resourceDetails.Tags {
+				content += fmt.Sprintf("\n   • %s: %s", key, value)
+			}
+		}
+
+		if len(m.resourceDetails.Properties) > 0 {
+			content += "\n\n⚙️  Additional Properties:"
+			for key, value := range m.resourceDetails.Properties {
+				content += fmt.Sprintf("\n   • %s: %v", key, value)
+			}
+		}
+	}
+
+	return content
 }
 
 func main() {
 	m := initModel()
-
-	// Add additional options for better terminal compatibility
-	p := tea.NewProgram(m,
-		tea.WithAltScreen(),
-		tea.WithMouseCellMotion(),
-	)
+	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if err := p.Start(); err != nil {
-		fmt.Printf("Error starting Azure TUI: %v\n", err)
+		fmt.Printf("Error starting Azure Dashboard: %v\n", err)
 	}
 }
