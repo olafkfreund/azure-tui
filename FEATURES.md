@@ -96,12 +96,18 @@ The enhanced TUI features a sophisticated interface system with two modes:
 
 The application integrates with AI providers:
 
-- **OpenAI GPT-4**: For general analysis and code generation
+- **GitHub Copilot**: Recommended for enhanced Azure-specific analysis
+- **OpenAI GPT-4**: Alternative for general analysis and code generation
 - **Custom Agents**: Specialized agents for different Azure scenarios
 
-Set up AI integration:
+Set up AI integration (choose one):
 
 ```bash
+# Option 1: GitHub Copilot (Recommended)
+export GITHUB_TOKEN="your-github-token"
+export USE_GITHUB_COPILOT="true"  # optional, auto-detected
+
+# Option 2: OpenAI API
 export OPENAI_API_KEY="your-openai-api-key"
 ```
 

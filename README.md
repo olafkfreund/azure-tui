@@ -104,8 +104,13 @@ DEMO_MODE=true ./aztui
 export AZURE_SUBSCRIPTION_ID="your-subscription-id"
 export AZURE_TENANT_ID="your-tenant-id"
 
-# AI Integration
+# AI Integration (Choose one)
+# Option 1: OpenAI API
 export OPENAI_API_KEY="your-openai-api-key"
+
+# Option 2: GitHub Copilot (Recommended)
+export GITHUB_TOKEN="your-github-token"
+export USE_GITHUB_COPILOT="true"  # optional, auto-detected if GITHUB_TOKEN is set
 
 # Application Settings
 export DEMO_MODE="true"  # Run without Azure credentials

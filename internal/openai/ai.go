@@ -4,24 +4,54 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"os"
 	"strings"
 
 	openai "github.com/sashabaranov/go-openai"
 )
 
 type AIProvider struct {
-	Client *openai.Client
+	Client   *openai.Client
+	isGitHub bool // Track if we're using GitHub Copilot
+}
+
+// getModel returns the appropriate model based on the provider
+func (ai *AIProvider) getModel() string {
+	if ai.isGitHub {
+		return "gpt-4" // GitHub Copilot uses different model names
+	}
+	return openai.GPT4
 }
 
 func NewAIProvider(apiKey string) *AIProvider {
 	config := openai.DefaultConfig(apiKey)
+
+	// Check if we should use GitHub Copilot API instead of OpenAI
+	githubToken := os.Getenv("GITHUB_TOKEN")
+	useGitHub := os.Getenv("USE_GITHUB_COPILOT") == "true" || githubToken != ""
+
+	isGitHub := false
+	if useGitHub && githubToken != "" {
+		// Configure for GitHub Copilot API
+		config = openai.DefaultConfig(githubToken)
+		config.BaseURL = "https://api.githubcopilot.com/chat/completions"
+		config.APIType = openai.APITypeOpenAI
+		isGitHub = true
+	} else if apiKey == "" && githubToken != "" {
+		// Fallback to GitHub if no OpenAI key but GitHub token available
+		config = openai.DefaultConfig(githubToken)
+		config.BaseURL = "https://api.githubcopilot.com/chat/completions"
+		config.APIType = openai.APITypeOpenAI
+		isGitHub = true
+	}
+
 	config.HTTPClient = &http.Client{}
-	return &AIProvider{Client: openai.NewClientWithConfig(config)}
+	return &AIProvider{Client: openai.NewClientWithConfig(config), isGitHub: isGitHub}
 }
 
 func (ai *AIProvider) Ask(question string, contextStr string) (string, error) {
 	resp, err := ai.Client.CreateChatCompletion(context.Background(), openai.ChatCompletionRequest{
-		Model:    openai.GPT4,
+		Model:    ai.getModel(),
 		Messages: []openai.ChatCompletionMessage{{Role: openai.ChatMessageRoleUser, Content: contextStr + "\n" + question}},
 	})
 	if err != nil {

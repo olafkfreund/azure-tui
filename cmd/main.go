@@ -149,9 +149,13 @@ func main() {
 // initialModel returns the starting state for the TUI.
 func initialModel() tea.Model {
 	// Initialize AI provider with API key from environment
+	// Support both OpenAI API key and GitHub token
 	apiKey := os.Getenv("OPENAI_API_KEY")
+	githubToken := os.Getenv("GITHUB_TOKEN")
 	var aiProvider *openai.AIProvider
-	if apiKey != "" {
+
+	if apiKey != "" || githubToken != "" {
+		// Pass the OpenAI key, but the provider will auto-detect GitHub usage
 		aiProvider = openai.NewAIProvider(apiKey)
 	}
 
