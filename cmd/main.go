@@ -285,6 +285,10 @@ type model struct {
 	editingResourceType   string
 	currentResourceConfig map[string]string
 	resourceMetrics       map[string]interface{}
+
+	// Terminal dimensions
+	termWidth  int
+	termHeight int
 }
 
 func (m *model) Init() tea.Cmd {
@@ -307,6 +311,10 @@ type resourceLoadErrMsg string
 
 func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.termWidth = msg.Width
+		m.termHeight = msg.Height
+		return m, nil
 	case loadedMsg:
 		m.subscriptions = msg.subs
 		m.tenants = msg.tenants
@@ -866,7 +874,7 @@ func (m *model) View() string {
 		content = resTab.Content
 	}
 
-	baseView := renderMainBoxLipgloss(tabBar + "\n" + content)
+	baseView := renderMainBoxLipgloss(tabBar+"\n"+content, m.termWidth, m.termHeight)
 
 	// Show dialogs and popups on top of the main view
 	if m.showAIPopup {
@@ -1054,10 +1062,28 @@ func renderRightPanel(m *model) string {
 }
 
 // --- Modern Main Box with Lipgloss ---
-func renderMainBoxLipgloss(content string) string {
-	width := 90
-	height := 36
-	boxStyle := lipgloss.NewStyle().Width(width).Height(height).Border(lipgloss.DoubleBorder()).BorderForeground(lipgloss.Color("63")).Align(lipgloss.Center, lipgloss.Center).Background(lipgloss.Color("235")).Foreground(lipgloss.Color("252")).Padding(0, 1)
+func renderMainBoxLipgloss(content string, termWidth, termHeight int) string {
+	// Use full terminal size minus small margins
+	width := termWidth - 2
+	height := termHeight - 2
+
+	// Ensure minimum size
+	if width < 40 {
+		width = 40
+	}
+	if height < 10 {
+		height = 10
+	}
+
+	boxStyle := lipgloss.NewStyle().
+		Width(width).
+		Height(height).
+		Border(lipgloss.DoubleBorder()).
+		BorderForeground(lipgloss.Color("63")).
+		Align(lipgloss.Left, lipgloss.Top).
+		Background(lipgloss.Color("235")).
+		Foreground(lipgloss.Color("252")).
+		Padding(1, 2)
 	return boxStyle.Render(content)
 }
 
@@ -1114,11 +1140,11 @@ func loadResourcesCmd(subID string) tea.Cmd {
 // fetchResourceGroups uses Azure Go SDK via azuresdk.AzureClient to get resource groups for the current subscription.
 func fetchResourceGroups(subID string) ([]ResourceGroup, error) {
 	if azureClient == nil {
-		return []ResourceGroup{{Name: "DemoGroup", Location: "westeurope"}}, nil
+		return getDemoResourceGroups(), nil
 	}
 	groups, err := azureClient.ListResourceGroups(subID)
 	if err != nil || len(groups) == 0 {
-		return []ResourceGroup{{Name: "DemoGroup", Location: "westeurope"}}, nil
+		return getDemoResourceGroups(), nil
 	}
 	var result []ResourceGroup
 	for _, g := range groups {
@@ -1128,6 +1154,60 @@ func fetchResourceGroups(subID string) ([]ResourceGroup, error) {
 		})
 	}
 	return result, nil
+}
+
+// getDemoResourceGroups returns sample resource groups for demo mode
+func getDemoResourceGroups() []ResourceGroup {
+	return []ResourceGroup{
+		{Name: "prod-webapp-rg", Location: "westeurope"},
+		{Name: "dev-environment-rg", Location: "eastus"},
+		{Name: "data-analytics-rg", Location: "westus2"},
+		{Name: "monitoring-rg", Location: "northeurope"},
+		{Name: "backup-storage-rg", Location: "centralus"},
+	}
+}
+
+// getDemoResourcesForGroup returns sample resources for a given demo resource group
+func getDemoResourcesForGroup(groupName string) []AzureResource {
+	switch groupName {
+	case "prod-webapp-rg":
+		return []AzureResource{
+			{ID: "demo-webapp-01", Name: "webapp-frontend", Type: "Microsoft.Web/sites", Location: "westeurope"},
+			{ID: "demo-sql-01", Name: "webapp-database", Type: "Microsoft.Sql/servers", Location: "westeurope"},
+			{ID: "demo-redis-01", Name: "webapp-cache", Type: "Microsoft.Cache/Redis", Location: "westeurope"},
+			{ID: "demo-storage-01", Name: "webappstorageacct", Type: "Microsoft.Storage/storageAccounts", Location: "westeurope"},
+			{ID: "demo-keyvault-01", Name: "webapp-secrets", Type: "Microsoft.KeyVault/vaults", Location: "westeurope"},
+		}
+	case "dev-environment-rg":
+		return []AzureResource{
+			{ID: "demo-vm-01", Name: "dev-jumpbox", Type: "Microsoft.Compute/virtualMachines", Location: "eastus"},
+			{ID: "demo-aks-01", Name: "dev-k8s-cluster", Type: "Microsoft.ContainerService/managedClusters", Location: "eastus"},
+			{ID: "demo-acr-01", Name: "devcontainerregistry", Type: "Microsoft.ContainerRegistry/registries", Location: "eastus"},
+			{ID: "demo-vnet-01", Name: "dev-virtual-network", Type: "Microsoft.Network/virtualNetworks", Location: "eastus"},
+		}
+	case "data-analytics-rg":
+		return []AzureResource{
+			{ID: "demo-cosmos-01", Name: "analytics-cosmosdb", Type: "Microsoft.DocumentDB/databaseAccounts", Location: "westus2"},
+			{ID: "demo-datafactory-01", Name: "analytics-pipeline", Type: "Microsoft.DataFactory/factories", Location: "westus2"},
+			{ID: "demo-synapse-01", Name: "analytics-workspace", Type: "Microsoft.Synapse/workspaces", Location: "westus2"},
+			{ID: "demo-storage-02", Name: "datalakestorage", Type: "Microsoft.Storage/storageAccounts", Location: "westus2"},
+		}
+	case "monitoring-rg":
+		return []AzureResource{
+			{ID: "demo-loganalytics-01", Name: "central-logs", Type: "Microsoft.OperationalInsights/workspaces", Location: "northeurope"},
+			{ID: "demo-appinsights-01", Name: "app-monitoring", Type: "microsoft.insights/components", Location: "northeurope"},
+			{ID: "demo-alerts-01", Name: "critical-alerts", Type: "microsoft.insights/actiongroups", Location: "northeurope"},
+		}
+	case "backup-storage-rg":
+		return []AzureResource{
+			{ID: "demo-vault-01", Name: "backup-vault", Type: "Microsoft.RecoveryServices/vaults", Location: "centralus"},
+			{ID: "demo-storage-03", Name: "backupstorage", Type: "Microsoft.Storage/storageAccounts", Location: "centralus"},
+		}
+	default:
+		return []AzureResource{
+			{ID: "demo-resource-default", Name: "sample-resource", Type: "Microsoft.Resources/resourceGroups", Location: "westeurope"},
+		}
+	}
 }
 
 // loadResourcesInGroupCmd loads resources for a given resource group.
@@ -1151,7 +1231,7 @@ func fetchResourcesInGroup(groupName string) ([]AzureResource, error) {
 		_ = json.Unmarshal(out, &resources)
 	}
 	if len(resources) == 0 {
-		resources = []AzureResource{{ID: "demo-res", Name: "DemoVM", Type: "Microsoft.Compute/virtualMachines", Location: "westeurope"}}
+		resources = getDemoResourcesForGroup(groupName)
 	}
 	return resources, nil
 }
