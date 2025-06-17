@@ -729,93 +729,439 @@ func RenderMetricsDashboard(resourceName string, metrics map[string]interface{})
 }
 
 // RenderResourceActions renders available actions for a selected resource
-func RenderResourceActions(resourceType, resourceName string) string {
-	var actions strings.Builder
+func RenderResourceActions(resourceType, resourceName string, actions []string) string {
+	var content strings.Builder
 
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
-	actions.WriteString(headerStyle.Render(fmt.Sprintf("⚙️  Actions for %s: %s", resourceType, resourceName)))
-	actions.WriteString("\n\n")
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Background(lipgloss.Color("236")).Padding(0, 2)
+	content.WriteString(headerStyle.Render(fmt.Sprintf("⚡ Actions: %s", resourceName)))
+	content.WriteString("\n\n")
 
-	// Common actions for all resources
-	actionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
-	actions.WriteString(fmt.Sprintf("%s [v]iew details\n", actionStyle.Render("📄")))
-	actions.WriteString(fmt.Sprintf("%s [m]etrics dashboard\n", actionStyle.Render("📊")))
-	actions.WriteString(fmt.Sprintf("%s [l]ogs\n", actionStyle.Render("📋")))
-	actions.WriteString(fmt.Sprintf("%s [e]dit configuration\n", actionStyle.Render("✏️")))
-	actions.WriteString(fmt.Sprintf("%s [d]elete resource\n", actionStyle.Render("🗑️")))
-	actions.WriteString(fmt.Sprintf("%s [t]erraform code\n", actionStyle.Render("🔧")))
-	actions.WriteString(fmt.Sprintf("%s [b]icep code\n", actionStyle.Render("🔨")))
-	actions.WriteString(fmt.Sprintf("%s [a]i analysis\n", actionStyle.Render("🤖")))
+	content.WriteString("Available actions:\n\n")
 
-	// Resource-specific actions
-	switch strings.ToLower(resourceType) {
-	case "vm", "virtualmachine":
-		actions.WriteString(fmt.Sprintf("%s [s]sh connect\n", actionStyle.Render("🔌")))
-		actions.WriteString(fmt.Sprintf("%s [r]estart\n", actionStyle.Render("🔄")))
-		actions.WriteString(fmt.Sprintf("%s [p]ower off\n", actionStyle.Render("⏻")))
-	case "aks", "kubernetes":
-		actions.WriteString(fmt.Sprintf("%s [k]ubectl connect\n", actionStyle.Render("☸️")))
-		actions.WriteString(fmt.Sprintf("%s [n]odes status\n", actionStyle.Render("🖥️")))
-		actions.WriteString(fmt.Sprintf("%s [p]ods status\n", actionStyle.Render("📦")))
-	case "storage", "storageaccount":
-		actions.WriteString(fmt.Sprintf("%s [f]ile browser\n", actionStyle.Render("📁")))
-		actions.WriteString(fmt.Sprintf("%s [u]pload file\n", actionStyle.Render("⬆️")))
-		actions.WriteString(fmt.Sprintf("%s [c]ontainers\n", actionStyle.Render("🗂️")))
-	case "database", "sql":
-		actions.WriteString(fmt.Sprintf("%s [q]uery editor\n", actionStyle.Render("💾")))
-		actions.WriteString(fmt.Sprintf("%s [b]ackup now\n", actionStyle.Render("💿")))
-		actions.WriteString(fmt.Sprintf("%s [u]sers\n", actionStyle.Render("👥")))
+	actionIcons := map[string]string{
+		"start":       "▶️",
+		"stop":        "⏹️",
+		"restart":     "🔄",
+		"ssh":         "🔐",
+		"bastion":     "🏰",
+		"scale":       "📈",
+		"connect":     "🔗",
+		"pods":        "🐳",
+		"deployments": "🚀",
+		"browse":      "🌐",
+		"logs":        "📋",
+		"backup":      "💾",
+		"security":    "🔒",
+		"metrics":     "📊",
+		"edit":        "✏️",
+		"delete":      "🗑️",
+		"view":        "📄",
+		"terraform":   "🔧",
+		"bicep":       "🔨",
+		"ai":          "🤖",
 	}
 
-	return actions.String()
+	for i, action := range actions {
+		icon := actionIcons[action]
+		if icon == "" {
+			icon = "⚙️"
+		}
+
+		actionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+		content.WriteString(fmt.Sprintf("%d. %s %s\n", i+1, icon, actionStyle.Render(strings.Title(action))))
+	}
+
+	content.WriteString("\n")
+	controlsStyle := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("8"))
+	content.WriteString(controlsStyle.Render("Select action by number • Press 'q' to cancel"))
+
+	return content.String()
 }
 
 // RenderEditDialog renders a dialog for editing resource configuration
 func RenderEditDialog(resourceName, resourceType string, currentConfig map[string]string) string {
-	var dialog strings.Builder
+	var content strings.Builder
 
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("4")).Padding(0, 2)
-	dialog.WriteString(headerStyle.Render(fmt.Sprintf("✏️  Edit %s: %s", resourceType, resourceName)))
-	dialog.WriteString("\n\n")
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Background(lipgloss.Color("236")).Padding(0, 2)
+	content.WriteString(headerStyle.Render(fmt.Sprintf("✏️ Edit: %s", resourceName)))
+	content.WriteString("\n\n")
 
-	// Configuration fields
+	content.WriteString(fmt.Sprintf("Resource Type: %s\n\n", resourceType))
+
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("33"))
+	content.WriteString(sectionStyle.Render("Current Configuration:"))
+	content.WriteString("\n")
+
 	for key, value := range currentConfig {
-		fieldStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
-		valueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("7")).Background(lipgloss.Color("0")).Padding(0, 1)
-		dialog.WriteString(fmt.Sprintf("%s: %s\n", fieldStyle.Render(key), valueStyle.Render(value)))
+		keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+		content.WriteString(fmt.Sprintf("%s: %s\n", keyStyle.Render(key), value))
 	}
 
-	dialog.WriteString("\n")
+	content.WriteString("\n")
 	controlsStyle := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("8"))
-	dialog.WriteString(controlsStyle.Render("Controls: [enter]edit field • [tab]next field • [esc]cancel • [ctrl+s]save"))
+	content.WriteString(controlsStyle.Render("Use arrow keys to navigate • Enter to edit • ESC to cancel"))
 
-	borderStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1)
-	return borderStyle.Render(dialog.String())
+	return content.String()
 }
 
 // RenderDeleteConfirmation renders a confirmation dialog for resource deletion
 func RenderDeleteConfirmation(resourceName, resourceType string) string {
-	var dialog strings.Builder
+	style := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1).Foreground(lipgloss.Color("9"))
+	content := fmt.Sprintf("⚠️  Delete Resource\n\nAre you sure you want to delete:\n\nName: %s\nType: %s\n\nThis action cannot be undone!\n\nPress 'y' to confirm, 'n' to cancel", resourceName, resourceType)
+	return style.Render(content)
+}
 
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("15")).Background(lipgloss.Color("1")).Padding(0, 2)
-	dialog.WriteString(headerStyle.Render("⚠️  DELETE CONFIRMATION"))
-	dialog.WriteString("\n\n")
+// RenderStructuredResourceDetails renders comprehensive resource information
+func RenderStructuredResourceDetails(details map[string]interface{}) string {
+	var content strings.Builder
 
-	warningStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
-	dialog.WriteString(warningStyle.Render(fmt.Sprintf("Are you sure you want to delete this %s?", resourceType)))
-	dialog.WriteString("\n\n")
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Background(lipgloss.Color("236")).Padding(0, 2)
+	content.WriteString(headerStyle.Render("📋 Resource Details"))
+	content.WriteString("\n\n")
 
-	resourceStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
-	dialog.WriteString(fmt.Sprintf("Resource: %s\n", resourceStyle.Render(resourceName)))
-	dialog.WriteString(fmt.Sprintf("Type: %s\n\n", resourceStyle.Render(resourceType)))
+	// Basic Information Section
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("33"))
+	content.WriteString(sectionStyle.Render("📍 Basic Information"))
+	content.WriteString("\n")
 
-	dialog.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("9")).Render("⚠️  This action cannot be undone!"))
-	dialog.WriteString("\n\n")
+	if name, ok := details["name"].(string); ok {
+		content.WriteString(fmt.Sprintf("Name:           %s\n", name))
+	}
+	if resourceType, ok := details["type"].(string); ok {
+		content.WriteString(fmt.Sprintf("Type:           %s\n", resourceType))
+	}
+	if location, ok := details["location"].(string); ok {
+		content.WriteString(fmt.Sprintf("Location:       %s\n", location))
+	}
+	if resourceGroup, ok := details["resourceGroup"].(string); ok {
+		content.WriteString(fmt.Sprintf("Resource Group: %s\n", resourceGroup))
+	}
+	if status, ok := details["status"].(string); ok {
+		statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+		if status != "Succeeded" && status != "Running" {
+			statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+		}
+		content.WriteString(fmt.Sprintf("Status:         %s\n", statusStyle.Render(status)))
+	}
 
-	controlsStyle := lipgloss.NewStyle().Bold(true)
-	dialog.WriteString(controlsStyle.Foreground(lipgloss.Color("1")).Render("[y]es, delete "))
-	dialog.WriteString(controlsStyle.Foreground(lipgloss.Color("10")).Render("[n]o, cancel"))
+	// Timestamps Section
+	content.WriteString("\n")
+	content.WriteString(sectionStyle.Render("📅 Timestamps"))
+	content.WriteString("\n")
 
-	borderStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).BorderForeground(lipgloss.Color("1")).Padding(1)
-	return borderStyle.Render(dialog.String())
+	if createdTime, ok := details["createdTime"].(string); ok && createdTime != "" {
+		content.WriteString(fmt.Sprintf("Created:        %s\n", createdTime))
+	}
+	if modifiedTime, ok := details["modifiedTime"].(string); ok && modifiedTime != "" {
+		content.WriteString(fmt.Sprintf("Last Modified:  %s\n", modifiedTime))
+	}
+
+	// Tags Section
+	if tags, ok := details["tags"].(map[string]string); ok && len(tags) > 0 {
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("🏷️  Tags"))
+		content.WriteString("\n")
+
+		for key, value := range tags {
+			tagStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+			content.WriteString(fmt.Sprintf("%s: %s\n", tagStyle.Render(key), value))
+		}
+	}
+
+	// SKU/Pricing Section
+	if sku, ok := details["sku"].(map[string]interface{}); ok && len(sku) > 0 {
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("💰 SKU/Pricing"))
+		content.WriteString("\n")
+
+		for key, value := range sku {
+			content.WriteString(fmt.Sprintf("%s: %v\n", strings.Title(key), value))
+		}
+	}
+
+	// Properties Section (condensed)
+	if properties, ok := details["properties"].(map[string]interface{}); ok && len(properties) > 0 {
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("⚙️  Configuration"))
+		content.WriteString("\n")
+
+		// Show only important properties to avoid clutter
+		importantProps := []string{"vmSize", "osType", "provisioningState", "adminUsername", "computerName", "dnsSettings", "ipConfigurations"}
+		for _, prop := range importantProps {
+			if value, exists := properties[prop]; exists {
+				propStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+				content.WriteString(fmt.Sprintf("%s: %s\n", propStyle.Render(strings.Title(prop)), fmt.Sprintf("%v", value)))
+			}
+		}
+	}
+
+	return content.String()
+}
+
+// RenderEnhancedMetricsDashboard renders real-time metrics with graphs
+func RenderEnhancedMetricsDashboard(resourceName string, metrics map[string]interface{}, trends map[string][]float64) string {
+	var dashboard strings.Builder
+
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Background(lipgloss.Color("236")).Padding(0, 2)
+	dashboard.WriteString(headerStyle.Render(fmt.Sprintf("📊 Live Metrics: %s", resourceName)))
+	dashboard.WriteString("\n\n")
+
+	// Current Metrics Row
+	metricsStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1).Margin(0, 1)
+
+	// CPU Section
+	cpuContent := "🖥️  CPU Usage\n"
+	if cpu, exists := metrics["cpu_usage"]; exists {
+		cpuValue := fmt.Sprintf("%.1f%%", cpu)
+		cpuStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+		if val, ok := cpu.(float64); ok && val > 80 {
+			cpuStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+		} else if val, ok := cpu.(float64); ok && val > 60 {
+			cpuStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+		}
+		cpuContent += cpuStyle.Render(cpuValue)
+
+		// Add CPU trend graph
+		if cpuTrend, exists := trends["cpu"]; exists && len(cpuTrend) > 0 {
+			cpuContent += "\n" + generateTrendGraph(cpuTrend, 20, 100)
+		}
+	}
+	dashboard.WriteString(metricsStyle.Render(cpuContent))
+
+	// Memory Section
+	memContent := "💾 Memory Usage\n"
+	if mem, exists := metrics["memory_usage"]; exists {
+		memValue := fmt.Sprintf("%.1f%%", mem)
+		memStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+		if val, ok := mem.(float64); ok && val > 85 {
+			memStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+		} else if val, ok := mem.(float64); ok && val > 70 {
+			memStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+		}
+		memContent += memStyle.Render(memValue)
+
+		// Add memory trend graph
+		if memTrend, exists := trends["memory"]; exists && len(memTrend) > 0 {
+			memContent += "\n" + generateTrendGraph(memTrend, 20, 100)
+		}
+	}
+	dashboard.WriteString(metricsStyle.Render(memContent))
+
+	dashboard.WriteString("\n")
+
+	// Network Section
+	netContent := "🌐 Network I/O\n"
+	if netIn, exists := metrics["network_in"]; exists {
+		netContent += fmt.Sprintf("In:  %.2f MB/s\n", netIn)
+	}
+	if netOut, exists := metrics["network_out"]; exists {
+		netContent += fmt.Sprintf("Out: %.2f MB/s\n", netOut)
+	}
+	// Add network trend graph
+	if netTrend, exists := trends["network"]; exists && len(netTrend) > 0 {
+		netContent += generateTrendGraph(netTrend, 20, 0) // Auto-scale for network
+	}
+	dashboard.WriteString(metricsStyle.Render(netContent))
+
+	// Disk Section
+	diskContent := "💿 Disk I/O\n"
+	if diskRead, exists := metrics["disk_read"]; exists {
+		diskContent += fmt.Sprintf("Read:  %.2f MB/s\n", diskRead)
+	}
+	if diskWrite, exists := metrics["disk_write"]; exists {
+		diskContent += fmt.Sprintf("Write: %.2f MB/s\n", diskWrite)
+	}
+	// Add disk trend graph
+	if diskTrend, exists := trends["disk"]; exists && len(diskTrend) > 0 {
+		diskContent += generateTrendGraph(diskTrend, 20, 0) // Auto-scale for disk
+	}
+	dashboard.WriteString(metricsStyle.Render(diskContent))
+
+	dashboard.WriteString("\n\n")
+
+	// Controls and refresh info
+	controlsStyle := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("8"))
+	dashboard.WriteString(controlsStyle.Render("⚡ Auto-refresh: 30s | [r]efresh now | [a]lerts | [h]istory | [q]uit"))
+
+	return dashboard.String()
+}
+
+// RenderAKSDetails renders comprehensive AKS cluster information
+func RenderAKSDetails(clusterName string, aksDetails map[string]interface{}) string {
+	var content strings.Builder
+
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Background(lipgloss.Color("236")).Padding(0, 2)
+	content.WriteString(headerStyle.Render(fmt.Sprintf("🚢 AKS Cluster: %s", clusterName)))
+	content.WriteString("\n\n")
+
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("33"))
+
+	// Cluster Overview
+	content.WriteString(sectionStyle.Render("📋 Cluster Overview"))
+	content.WriteString("\n")
+
+	if status, ok := aksDetails["status"].(string); ok {
+		statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+		if status != "Running" && status != "Succeeded" {
+			statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+		}
+		content.WriteString(fmt.Sprintf("Status:         %s\n", statusStyle.Render(status)))
+	}
+
+	if kubeVersion, ok := aksDetails["kubernetesVersion"].(string); ok {
+		content.WriteString(fmt.Sprintf("Kubernetes:     %s\n", kubeVersion))
+	}
+
+	if nodeCount, ok := aksDetails["nodeCount"].(int); ok {
+		content.WriteString(fmt.Sprintf("Total Nodes:    %d\n", nodeCount))
+	}
+
+	// Node Pools
+	if nodePools, ok := aksDetails["nodePools"].([]interface{}); ok && len(nodePools) > 0 {
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("🖥️  Node Pools"))
+		content.WriteString("\n")
+
+		for _, pool := range nodePools {
+			if poolMap, ok := pool.(map[string]interface{}); ok {
+				name := poolMap["name"].(string)
+				count := poolMap["count"].(int)
+				vmSize := poolMap["vmSize"].(string)
+				osType := poolMap["osType"].(string)
+
+				poolStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+				content.WriteString(fmt.Sprintf("%s: %d × %s (%s)\n", poolStyle.Render(name), count, vmSize, osType))
+			}
+		}
+	}
+
+	// Pods Summary
+	if pods, ok := aksDetails["pods"].([]interface{}); ok {
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("🐳 Pods Summary"))
+		content.WriteString("\n")
+
+		podCounts := make(map[string]int)
+		nsCounts := make(map[string]int)
+
+		for _, pod := range pods {
+			if podMap, ok := pod.(map[string]interface{}); ok {
+				status := podMap["status"].(string)
+				namespace := podMap["namespace"].(string)
+				podCounts[status]++
+				nsCounts[namespace]++
+			}
+		}
+
+		content.WriteString(fmt.Sprintf("Total Pods:     %d\n", len(pods)))
+
+		for status, count := range podCounts {
+			statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+			if status != "Running" {
+				statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+			}
+			content.WriteString(fmt.Sprintf("%s: %s\n", statusStyle.Render(strings.Title(status)), fmt.Sprintf("%d", count)))
+		}
+
+		content.WriteString("\nTop Namespaces:\n")
+		for ns, count := range nsCounts {
+			if count > 1 { // Only show namespaces with multiple pods
+				nsStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
+				content.WriteString(fmt.Sprintf("%s: %d pods\n", nsStyle.Render(ns), count))
+			}
+		}
+	}
+
+	// Deployments Summary
+	if deployments, ok := aksDetails["deployments"].([]interface{}); ok && len(deployments) > 0 {
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("🚀 Deployments"))
+		content.WriteString("\n")
+
+		content.WriteString(fmt.Sprintf("Total Deployments: %d\n", len(deployments)))
+
+		// Show first few deployments
+		for i, deploy := range deployments {
+			if i >= 5 { // Limit to first 5
+				content.WriteString(fmt.Sprintf("... and %d more\n", len(deployments)-5))
+				break
+			}
+
+			if deployMap, ok := deploy.(map[string]interface{}); ok {
+				name := deployMap["name"].(string)
+				namespace := deployMap["namespace"].(string)
+				ready := deployMap["ready"].(string)
+
+				deployStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("13"))
+				content.WriteString(fmt.Sprintf("%s (%s): %s\n", deployStyle.Render(name), namespace, ready))
+			}
+		}
+	}
+
+	// Services Summary
+	if services, ok := aksDetails["services"].([]interface{}); ok && len(services) > 0 {
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("🔗 Services"))
+		content.WriteString("\n")
+
+		typeCounts := make(map[string]int)
+		for _, svc := range services {
+			if svcMap, ok := svc.(map[string]interface{}); ok {
+				svcType := svcMap["type"].(string)
+				typeCounts[svcType]++
+			}
+		}
+
+		content.WriteString(fmt.Sprintf("Total Services: %d\n", len(services)))
+		for svcType, count := range typeCounts {
+			typeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
+			content.WriteString(fmt.Sprintf("%s: %d\n", typeStyle.Render(svcType), count))
+		}
+	}
+
+	return content.String()
+}
+
+// Helper function to generate ASCII trend graphs
+func generateTrendGraph(data []float64, width int, maxValue float64) string {
+	if len(data) == 0 {
+		return ""
+	}
+
+	// Auto-scale if maxValue is 0
+	if maxValue == 0 {
+		for _, val := range data {
+			if val > maxValue {
+				maxValue = val
+			}
+		}
+	}
+
+	if maxValue == 0 {
+		maxValue = 1 // Avoid division by zero
+	}
+
+	// Create trend line
+	blocks := []string{"▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"}
+	var trend strings.Builder
+
+	// Sample data to fit width
+	step := len(data) / width
+	if step < 1 {
+		step = 1
+	}
+
+	for i := 0; i < width && i*step < len(data); i++ {
+		value := data[i*step]
+		level := int((value / maxValue) * float64(len(blocks)-1))
+		if level >= len(blocks) {
+			level = len(blocks) - 1
+		}
+		if level < 0 {
+			level = 0
+		}
+		trend.WriteString(blocks[level])
+	}
+
+	return trend.String()
 }

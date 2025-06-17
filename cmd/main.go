@@ -16,6 +16,8 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/olafkfreund/azure-tui/internal/azure/azuresdk"
+	"github.com/olafkfreund/azure-tui/internal/azure/resourceactions"
+	"github.com/olafkfreund/azure-tui/internal/azure/resourcedetails"
 	"github.com/olafkfreund/azure-tui/internal/azure/tfbicep"
 	"github.com/olafkfreund/azure-tui/internal/openai"
 	"github.com/olafkfreund/azure-tui/internal/tui"
@@ -148,14 +150,11 @@ func main() {
 
 // initialModel returns the starting state for the TUI.
 func initialModel() tea.Model {
-	// Initialize AI provider with API key from environment
-	// Support both OpenAI API key and GitHub token
+	// Initialize AI provider with OpenAI API key from environment
 	apiKey := os.Getenv("OPENAI_API_KEY")
-	githubToken := os.Getenv("GITHUB_TOKEN")
 	var aiProvider *openai.AIProvider
 
-	if apiKey != "" || githubToken != "" {
-		// Pass the OpenAI key, but the provider will auto-detect GitHub usage
+	if apiKey != "" {
 		aiProvider = openai.NewAIProvider(apiKey)
 	}
 
@@ -539,6 +538,61 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.loading || m.isLoading {
 			return m, nil
 		}
+
+		// Handle resource actions if the dialog is open
+		if m.showResourceActions {
+			switch msg.String() {
+			case "1":
+				// Start action
+				if strings.Contains(m.editingResourceType, "virtualMachines") {
+					result := resourceactions.StartVM(m.editingResourceName, m.selectedGroup)
+					m.aiMessage = fmt.Sprintf("Start VM Result:\n%s\n\nOutput:\n%s", result.Message, result.Output)
+					m.showAIPopup = true
+					m.showResourceActions = false
+				}
+				return m, nil
+			case "2":
+				// Stop action
+				if strings.Contains(m.editingResourceType, "virtualMachines") {
+					result := resourceactions.StopVM(m.editingResourceName, m.selectedGroup)
+					m.aiMessage = fmt.Sprintf("Stop VM Result:\n%s\n\nOutput:\n%s", result.Message, result.Output)
+					m.showAIPopup = true
+					m.showResourceActions = false
+				}
+				return m, nil
+			case "3":
+				// Restart action
+				if strings.Contains(m.editingResourceType, "virtualMachines") {
+					result := resourceactions.RestartVM(m.editingResourceName, m.selectedGroup)
+					m.aiMessage = fmt.Sprintf("Restart VM Result:\n%s\n\nOutput:\n%s", result.Message, result.Output)
+					m.showAIPopup = true
+					m.showResourceActions = false
+				}
+				return m, nil
+			case "4":
+				// SSH action
+				if strings.Contains(m.editingResourceType, "virtualMachines") {
+					result := resourceactions.ConnectVMSSH(m.editingResourceName, m.selectedGroup, "azureuser")
+					m.aiMessage = fmt.Sprintf("SSH Connection Result:\n%s\n\nOutput:\n%s", result.Message, result.Output)
+					m.showAIPopup = true
+					m.showResourceActions = false
+				}
+				return m, nil
+			case "5":
+				// Bastion action
+				if strings.Contains(m.editingResourceType, "virtualMachines") {
+					result := resourceactions.ConnectVMBastion(m.editingResourceName, m.selectedGroup)
+					m.aiMessage = fmt.Sprintf("Bastion Connection Result:\n%s\n\nOutput:\n%s", result.Message, result.Output)
+					m.showAIPopup = true
+					m.showResourceActions = false
+				}
+				return m, nil
+			case "esc":
+				m.showResourceActions = false
+				return m, nil
+			}
+		}
+
 		// Tab navigation
 		switch msg.String() {
 		case "tab":
@@ -577,9 +631,71 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 
 						if found == -1 {
-							// Create new content tab
-							content := fmt.Sprintf("Resource Details\n%s\n\nName: %s\nType: %s\nLocation: %s\nResource Group: %s\nID: %s\n\nActions:\n• Press 'a' for AI analysis\n• Press 'M' for metrics\n• Press 'E' to edit\n• Press 'T' for Terraform\n• Press 'B' for Bicep",
-								strings.Repeat("=", 50), resourceData.Name, resourceData.Type, resourceData.Location, m.selectedGroup, resourceData.ID)
+							// Get enhanced resource details
+							details, err := resourcedetails.GetResourceDetails(resourceData.ID)
+							var content string
+							if err != nil {
+								// Fallback to basic details
+								content = fmt.Sprintf("Resource Details\n%s\n\nName: %s\nType: %s\nLocation: %s\nResource Group: %s\nID: %s\n\nError loading enhanced details: %s\n\nActions:\n• Press 'a' for AI analysis\n• Press 'M' for metrics\n• Press 'E' to edit\n• Press 'T' for Terraform\n• Press 'B' for Bicep",
+									strings.Repeat("=", 50), resourceData.Name, resourceData.Type, resourceData.Location, m.selectedGroup, resourceData.ID, err.Error())
+							} else {
+								// Check if this is an AKS cluster for special handling
+								if strings.Contains(resourceData.Type, "managedClusters") {
+									// Get AKS-specific details
+									aksDetails, aksErr := resourcedetails.GetAKSDetails(resourceData.Name, m.selectedGroup)
+									if aksErr == nil {
+										// Convert AKS details to map for rendering
+										aksDetailsMap := map[string]interface{}{
+											"clusterInfo": aksDetails.ClusterInfo,
+											"nodePools":   aksDetails.NodePools,
+											"pods":        aksDetails.Pods,
+											"deployments": aksDetails.Deployments,
+											"services":    aksDetails.Services,
+											"namespaces":  aksDetails.Namespaces,
+										}
+										content = tui.RenderAKSDetails(resourceData.Name, aksDetailsMap)
+									} else {
+										// Fallback to regular structured details
+										detailsMap := map[string]interface{}{
+											"id":            details.ID,
+											"name":          details.Name,
+											"type":          details.Type,
+											"location":      details.Location,
+											"resourceGroup": details.ResourceGroup,
+											"createdTime":   details.CreatedTime,
+											"modifiedTime":  details.ModifiedTime,
+											"status":        details.Status,
+											"tags":          details.Tags,
+											"sku":           details.SKU,
+											"properties":    details.Properties,
+											"aksError":      "Failed to load AKS details: " + aksErr.Error(),
+										}
+										content = tui.RenderStructuredResourceDetails(detailsMap)
+									}
+								} else {
+									// Regular resource - render structured details
+									detailsMap := map[string]interface{}{
+										"id":            details.ID,
+										"name":          details.Name,
+										"type":          details.Type,
+										"location":      details.Location,
+										"resourceGroup": details.ResourceGroup,
+										"createdTime":   details.CreatedTime,
+										"modifiedTime":  details.ModifiedTime,
+										"status":        details.Status,
+										"tags":          details.Tags,
+										"sku":           details.SKU,
+										"properties":    details.Properties,
+									}
+									content = tui.RenderStructuredResourceDetails(detailsMap)
+								}
+
+								// Add available actions
+								availableActions := resourceactions.GetResourceActions(resourceData.Type)
+								if len(availableActions) > 0 {
+									content += "\n\n" + tui.RenderResourceActions(resourceData.Type, resourceData.Name, availableActions)
+								}
+							}
 
 							tab := tui.Tab{
 								Title:    resourceData.Name,
@@ -608,10 +724,34 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 				}
 				if found == -1 {
+					// Get enhanced resource details
+					details, err := resourcedetails.GetResourceDetails(res.ID)
+					var content string
+					if err != nil {
+						// Fallback to basic details
+						content = fmt.Sprintf("Name: %s\nType: %s\nLocation: %s\nID: %s\n\nError loading enhanced details: %s", res.Name, res.Type, res.Location, res.ID, err.Error())
+					} else {
+						// Render structured resource details
+						detailsMap := map[string]interface{}{
+							"id":            details.ID,
+							"name":          details.Name,
+							"type":          details.Type,
+							"location":      details.Location,
+							"resourceGroup": details.ResourceGroup,
+							"createdTime":   details.CreatedTime,
+							"modifiedTime":  details.ModifiedTime,
+							"status":        details.Status,
+							"tags":          details.Tags,
+							"sku":           details.SKU,
+							"properties":    details.Properties,
+						}
+						content = tui.RenderStructuredResourceDetails(detailsMap)
+					}
+
 					// Open new tab
 					tab := tui.Tab{
 						Title:    res.Name,
-						Content:  fmt.Sprintf("Name: %s\nType: %s\nLocation: %s\nID: %s", res.Name, res.Type, res.Location, res.ID),
+						Content:  content,
 						Type:     res.Type,
 						Meta:     map[string]string{"id": res.ID, "type": res.Type},
 						Closable: true,
@@ -1016,6 +1156,15 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			return m, nil
+		case "R":
+			// Show resource actions for selected resource
+			selectedResource := m.getSelectedResource()
+			if selectedResource != nil {
+				m.showResourceActions = true
+				m.editingResourceName = selectedResource.Name
+				m.editingResourceType = selectedResource.Type
+			}
+			return m, nil
 		case "M":
 			// Show metrics dashboard for selected resource
 			selectedResource := m.getSelectedResource()
@@ -1023,14 +1172,31 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.showMetricsDialog = true
 				m.editingResourceName = selectedResource.Name
 				m.editingResourceType = selectedResource.Type
-				// Generate demo metrics data
-				m.resourceMetrics = map[string]interface{}{
-					"cpu_usage":    75.5,
-					"memory_usage": 82.3,
-					"network_in":   12.5,
-					"network_out":  8.7,
-					"disk_read":    45.2,
-					"disk_write":   23.1,
+
+				// Try to get real metrics, fallback to demo data
+				metrics, err := resourcedetails.GetResourceMetrics(selectedResource.ID)
+				if err != nil {
+					// Generate demo metrics data as fallback
+					m.resourceMetrics = map[string]interface{}{
+						"cpu_usage":    75.5,
+						"memory_usage": 82.3,
+						"network_in":   12.5,
+						"network_out":  8.7,
+						"disk_read":    45.2,
+						"disk_write":   23.1,
+						"error":        "Failed to load real metrics: " + err.Error(),
+					}
+				} else {
+					m.resourceMetrics = map[string]interface{}{
+						"cpu_usage":    metrics.CPUUsage,
+						"memory_usage": metrics.MemoryUsage,
+						"network_in":   metrics.NetworkIn,
+						"network_out":  metrics.NetworkOut,
+						"disk_read":    metrics.DiskRead,
+						"disk_write":   metrics.DiskWrite,
+						"timestamp":    metrics.Timestamp.Format("2006-01-02 15:04:05"),
+						"trends":       metrics.TrendData,
+					}
 				}
 			}
 			return m, nil
@@ -1321,8 +1487,15 @@ func (m *model) View() string {
 	}
 
 	if m.showMetricsDialog {
-		metricsContent := tui.RenderMetricsDashboard(m.editingResourceName, m.resourceMetrics)
-		return baseView + "\n\n" + metricsContent
+		// Check if we have trend data for enhanced dashboard
+		if trends, ok := m.resourceMetrics["trends"].(map[string][]float64); ok && len(trends) > 0 {
+			metricsContent := tui.RenderEnhancedMetricsDashboard(m.editingResourceName, m.resourceMetrics, trends)
+			return baseView + "\n\n" + metricsContent
+		} else {
+			// Fallback to standard metrics dashboard
+			metricsContent := tui.RenderMetricsDashboard(m.editingResourceName, m.resourceMetrics)
+			return baseView + "\n\n" + metricsContent
+		}
 	}
 
 	if m.showEditDialog {
@@ -1336,7 +1509,9 @@ func (m *model) View() string {
 	}
 
 	if m.showResourceActions {
-		actionsContent := tui.RenderResourceActions(m.editingResourceType, m.editingResourceName)
+		// Get available actions for this resource type
+		availableActions := resourceactions.GetResourceActions(m.editingResourceType)
+		actionsContent := tui.RenderResourceActions(m.editingResourceType, m.editingResourceName, availableActions)
 		return baseView + "\n\n" + actionsContent
 	}
 
@@ -1350,6 +1525,7 @@ func (m *model) View() string {
 			"F2":      "Toggle tree/traditional",
 			"a":       "AI analysis",
 			"M":       "Metrics dashboard",
+			"R":       "Resource actions",
 			"E":       "Edit resource",
 			"Ctrl+D":  "Delete resource",
 			"T":       "Generate Terraform",

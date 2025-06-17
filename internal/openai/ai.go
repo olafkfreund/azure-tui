@@ -11,42 +11,13 @@ import (
 )
 
 type AIProvider struct {
-	Client   *openai.Client
-	isGitHub bool // Track if we're using GitHub Copilot
-}
-
-// getModel returns the appropriate model based on the provider
-func (ai *AIProvider) getModel() string {
-	if ai.isGitHub {
-		return "gpt-4" // GitHub Copilot uses different model names
-	}
-	return openai.GPT4
+	Client *openai.Client
 }
 
 func NewAIProvider(apiKey string) *AIProvider {
 	config := openai.DefaultConfig(apiKey)
-
-	// Check if we should use GitHub Copilot API instead of OpenAI
-	githubToken := os.Getenv("GITHUB_TOKEN")
-	useGitHub := os.Getenv("USE_GITHUB_COPILOT") == "true" || githubToken != ""
-
-	isGitHub := false
-	if useGitHub && githubToken != "" {
-		// Configure for GitHub Copilot API
-		config = openai.DefaultConfig(githubToken)
-		config.BaseURL = "https://api.githubcopilot.com/chat/completions"
-		config.APIType = openai.APITypeOpenAI
-		isGitHub = true
-	} else if apiKey == "" && githubToken != "" {
-		// Fallback to GitHub if no OpenAI key but GitHub token available
-		config = openai.DefaultConfig(githubToken)
-		config.BaseURL = "https://api.githubcopilot.com/chat/completions"
-		config.APIType = openai.APITypeOpenAI
-		isGitHub = true
-	}
-
 	config.HTTPClient = &http.Client{}
-	return &AIProvider{Client: openai.NewClientWithConfig(config), isGitHub: isGitHub}
+	return &AIProvider{Client: openai.NewClientWithConfig(config)}
 }
 
 func (ai *AIProvider) Ask(question string, contextStr string) (string, error) {
@@ -70,6 +41,15 @@ func (ai *AIProvider) DescribeResource(resourceType, resourceName, resourceDetai
 	prompt := fmt.Sprintf("Analyze this Azure %s resource named '%s' and provide:\n1. Brief description of what it does\n2. Current configuration summary\n3. Optimization recommendations\n4. Security considerations\n\nResource details:\n%s",
 		resourceType, resourceName, resourceDetails)
 	return ai.Ask(prompt, "Azure Resource Analysis")
+}
+
+// getModel returns the OpenAI model to use for completions
+func (ai *AIProvider) getModel() string {
+	model := os.Getenv("OPENAI_MODEL")
+	if model == "" {
+		model = "gpt-4" // Default to GPT-4
+	}
+	return model
 }
 
 // AnalyzeMetrics provides AI-powered analysis of resource metrics and performance data
