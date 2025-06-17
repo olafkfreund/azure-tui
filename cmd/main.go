@@ -79,23 +79,29 @@ type resourceActionMsg struct {
 type errorMsg struct{ error string }
 
 type model struct {
-	treeView         *tui.TreeView
-	statusBar        *tui.StatusBar
-	aiProvider       *openai.AIProvider
-	width, height    int
-	ready            bool
-	subscriptions    []Subscription
-	resourceGroups   []ResourceGroup
-	allResources     []AzureResource
-	selectedResource *AzureResource
-	resourceDetails  *resourcedetails.ResourceDetails
-	aiDescription    string
-	loadingState     string
-	selectedPanel    int
-	actionInProgress bool
-	lastActionResult *resourceactions.ActionResult
-	showDashboard    bool
-	logEntries       []string
+	treeView               *tui.TreeView
+	statusBar              *tui.StatusBar
+	aiProvider             *openai.AIProvider
+	width, height          int
+	ready                  bool
+	subscriptions          []Subscription
+	resourceGroups         []ResourceGroup
+	allResources           []AzureResource
+	selectedResource       *AzureResource
+	resourceDetails        *resourcedetails.ResourceDetails
+	aiDescription          string
+	loadingState           string
+	selectedPanel          int
+	rightPanelScrollOffset int
+	rightPanelMaxLines     int
+	actionInProgress       bool
+	lastActionResult       *resourceactions.ActionResult
+	showDashboard          bool
+	logEntries             []string
+	// New navigation fields
+	activeView            string          // "details", "dashboard", "welcome"
+	propertyExpandedIndex int             // For navigating expanded properties
+	expandedProperties    map[string]bool // Track which properties are expanded
 }
 
 func fetchSubscriptions() ([]Subscription, error) {
@@ -286,13 +292,18 @@ func initModel() model {
 	}
 
 	return model{
-		treeView:      tui.NewTreeView(),
-		statusBar:     tui.CreatePowerlineStatusBar(80),
-		aiProvider:    ai,
-		loadingState:  "loading",
-		selectedPanel: 0,
-		showDashboard: false,
-		logEntries:    []string{},
+		treeView:               tui.NewTreeView(),
+		statusBar:              tui.CreatePowerlineStatusBar(80),
+		aiProvider:             ai,
+		loadingState:           "loading",
+		selectedPanel:          0,
+		rightPanelScrollOffset: 0,
+		rightPanelMaxLines:     50,
+		showDashboard:          false,
+		logEntries:             []string{},
+		activeView:             "welcome",
+		propertyExpandedIndex:  -1,
+		expandedProperties:     make(map[string]bool),
 	}
 }
 
@@ -363,9 +374,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "tab":
 			m.selectedPanel = (m.selectedPanel + 1) % 2
+		case "left", "h":
+			// Left navigation - switch to tree panel or previous section
+			if m.selectedPanel == 1 {
+				m.selectedPanel = 0
+				m.rightPanelScrollOffset = 0 // Reset scroll when switching
+			}
+		case "right", "l":
+			// Right navigation - switch to details panel
+			if m.selectedPanel == 0 {
+				m.selectedPanel = 1
+			}
 		case "d":
 			// Toggle dashboard view
 			m.showDashboard = !m.showDashboard
+			if m.showDashboard {
+				m.activeView = "dashboard"
+			} else {
+				if m.selectedResource != nil {
+					m.activeView = "details"
+				} else {
+					m.activeView = "welcome"
+				}
+			}
 		case "j", "down":
 			if m.selectedPanel == 0 && m.treeView != nil {
 				m.treeView.SelectNext()
@@ -374,6 +405,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if resource, ok := selectedNode.ResourceData.(AzureResource); ok {
 						return m, loadResourceDetailsCmd(resource)
 					}
+				}
+			} else if m.selectedPanel == 1 {
+				// Right panel scrolling down
+				// Calculate max lines based on current content
+				rightContent := m.renderResourcePanel(m.width/3, m.height-2)
+				totalLines := strings.Count(rightContent, "\n")
+				maxLines := max(0, totalLines-(m.height-6))
+				if m.rightPanelScrollOffset < maxLines {
+					m.rightPanelScrollOffset++
 				}
 			}
 		case "k", "up":
@@ -384,6 +424,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if resource, ok := selectedNode.ResourceData.(AzureResource); ok {
 						return m, loadResourceDetailsCmd(resource)
 					}
+				}
+			} else if m.selectedPanel == 1 {
+				// Right panel scrolling up
+				if m.rightPanelScrollOffset > 0 {
+					m.rightPanelScrollOffset--
 				}
 			}
 		case " ", "enter":
@@ -401,6 +446,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							return m, loadResourceDetailsCmd(resource)
 						}
 					}
+				}
+			}
+		case "e":
+			// Toggle property expansion in details panel
+			if m.selectedPanel == 1 && m.selectedResource != nil {
+				// Toggle expansion for complex properties
+				if m.selectedResource.Type == "Microsoft.ContainerService/managedClusters" {
+					key := "agentPoolProfiles"
+					m.expandedProperties[key] = !m.expandedProperties[key]
 				}
 			}
 		case "s":
@@ -453,14 +507,32 @@ func (m model) View() string {
 		}
 
 		panelName := "Tree"
+		panelHelp := ""
+		navigationHelp := ""
 		if m.selectedPanel == 1 {
 			panelName = "Details"
+			if m.rightPanelScrollOffset > 0 {
+				panelHelp = " (j/k:scroll)"
+			} else {
+				panelHelp = " (j/k:scroll)"
+			}
+			navigationHelp = "h/←:Tree l/→:Stay"
+		} else {
+			panelHelp = " (j/k:navigate)"
+			navigationHelp = "l/→:Details"
 		}
-		m.statusBar.AddSegment(fmt.Sprintf("Panel: %s", panelName), colorAqua, bgMedium)
+		m.statusBar.AddSegment(fmt.Sprintf("▶ %s%s", panelName, panelHelp), colorAqua, bgMedium)
+		m.statusBar.AddSegment(navigationHelp, colorPurple, bgMedium)
+
+		// Add expansion hint for AKS resources
+		if m.selectedResource != nil && m.selectedResource.Type == "Microsoft.ContainerService/managedClusters" && m.selectedPanel == 1 {
+			m.statusBar.AddSegment("e:Expand AKS Properties", colorYellow, bgMedium)
+		}
+
 		m.statusBar.AddSegment("Tab:Switch d:Dashboard s:Start S:Stop r:Restart R:Refresh q:Quit", colorGray, bgLight)
 	}
 
-	// Two-panel layout - NO BORDERS AT ALL
+	// Two-panel layout - Enhanced with active panel indicators
 	leftWidth := m.width / 3
 	rightWidth := m.width - leftWidth
 
@@ -470,20 +542,61 @@ func (m model) View() string {
 		treeContent = m.treeView.RenderTreeView(leftWidth-4, m.height-2)
 	}
 
-	leftPanel := lipgloss.NewStyle().
+	// Style left panel with active indicator
+	leftPanelStyle := lipgloss.NewStyle().
 		Width(leftWidth).
 		Foreground(fgMedium).
-		Padding(1, 2).
-		Render(treeContent)
+		Padding(1, 2)
 
-	// Details panel
-	rightContent := m.renderResourcePanel(rightWidth-4, m.height-2)
+	// Add visual indicator for active panel
+	if m.selectedPanel == 0 {
+		leftPanelStyle = leftPanelStyle.
+			Foreground(fgLight).
+			Bold(true).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorBlue)
+		// Add enhanced active panel indicator
+		treeContent = "🔍 " + strings.Replace(treeContent, "\n", "\n   ", -1)
+	} else {
+		leftPanelStyle = leftPanelStyle.
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorGray)
+	}
 
-	rightPanel := lipgloss.NewStyle().
+	leftPanel := leftPanelStyle.Render(treeContent)
+
+	// Details panel with scrolling support
+	rightContentRaw := m.renderResourcePanel(rightWidth-4, m.height-2)
+	var rightContent string
+
+	// Apply scrolling if right panel is active
+	if m.selectedPanel == 1 {
+		rightContent = m.renderScrollableContent(rightContentRaw, m.height-6)
+	} else {
+		rightContent = rightContentRaw
+	}
+
+	// Style right panel with active indicator
+	rightPanelStyle := lipgloss.NewStyle().
 		Width(rightWidth).
 		Foreground(fgMedium).
-		Padding(1, 2).
-		Render(rightContent)
+		Padding(1, 2)
+
+	if m.selectedPanel == 1 {
+		rightPanelStyle = rightPanelStyle.
+			Foreground(fgLight).
+			Bold(true).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorGreen)
+		// Add enhanced active panel marker
+		rightContent = "📊 " + strings.Replace(rightContent, "\n", "\n   ", -1)
+	} else {
+		rightPanelStyle = rightPanelStyle.
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorGray)
+	}
+
+	rightPanel := rightPanelStyle.Render(rightContent)
 
 	// Join everything
 	statusBarContent := ""
@@ -691,7 +804,31 @@ func (m model) renderEnhancedResourceDetails(width, height int) string {
 		for _, prop := range importantProps {
 			if value, exists := m.resourceDetails.Properties[prop]; exists {
 				propStyle := lipgloss.NewStyle().Foreground(colorAqua)
-				content.WriteString(fmt.Sprintf("%s: %s\n", propStyle.Render(formatPropertyName(prop)), valueStyle.Render(fmt.Sprintf("%v", value))))
+				formattedName := formatPropertyName(prop)
+
+				// Check if this is a complex property that needs special formatting
+				if prop == "agentPoolProfiles" || prop == "subnets" || prop == "primaryEndpoints" {
+					isExpanded := m.expandedProperties[prop]
+					if isExpanded {
+						content.WriteString(fmt.Sprintf("%s: %s\n",
+							propStyle.Render(formattedName+" (Expanded)"),
+							formatComplexProperty(prop, value, 1)))
+					} else {
+						// Show condensed view with expansion hint
+						summary := getPropertySummary(prop, value)
+						expandHint := lipgloss.NewStyle().Foreground(colorGray).Render(" [Press 'e' to expand]")
+						content.WriteString(fmt.Sprintf("%s: %s%s\n",
+							propStyle.Render(formattedName),
+							valueStyle.Render(summary),
+							expandHint))
+					}
+				} else {
+					// Simple property formatting
+					formattedValue := formatValue(value)
+					content.WriteString(fmt.Sprintf("%s: %s\n",
+						propStyle.Render(formattedName),
+						valueStyle.Render(formattedValue)))
+				}
 			}
 		}
 	}
@@ -870,6 +1007,211 @@ func formatPropertyName(prop string) string {
 			result += string(r)
 		}
 	}
+	return result
+}
+
+// getPropertySummary returns a condensed summary of complex properties
+func getPropertySummary(propName string, value interface{}) string {
+	switch propName {
+	case "agentPoolProfiles":
+		if pools, ok := value.([]interface{}); ok {
+			return fmt.Sprintf("%d Agent Pool(s)", len(pools))
+		}
+	case "subnets":
+		if subnets, ok := value.([]interface{}); ok {
+			return fmt.Sprintf("%d Subnet(s)", len(subnets))
+		}
+	case "primaryEndpoints":
+		if endpoints, ok := value.(map[string]interface{}); ok {
+			return fmt.Sprintf("%d Endpoint(s)", len(endpoints))
+		}
+	}
+	return fmt.Sprintf("%v", value)
+}
+
+// formatComplexProperty formats complex properties like AKS agent pool profiles
+func formatComplexProperty(propName string, value interface{}, indent int) string {
+	indentStr := strings.Repeat("  ", indent)
+
+	switch propName {
+	case "agentPoolProfiles":
+		return formatAgentPoolProfiles(value, indent)
+	case "subnets":
+		return formatSubnets(value, indent)
+	case "primaryEndpoints":
+		return formatEndpoints(value, indent)
+	default:
+		// Handle generic objects and arrays
+		if slice, ok := value.([]interface{}); ok {
+			var result strings.Builder
+			result.WriteString(fmt.Sprintf("\n%s└─ %d items:", indentStr, len(slice)))
+			for i, item := range slice {
+				if i < 3 { // Show first 3 items
+					result.WriteString(fmt.Sprintf("\n%s   [%d] %v", indentStr, i, formatValue(item)))
+				} else if i == 3 {
+					result.WriteString(fmt.Sprintf("\n%s   ... and %d more", indentStr, len(slice)-3))
+					break
+				}
+			}
+			return result.String()
+		} else if obj, ok := value.(map[string]interface{}); ok {
+			var result strings.Builder
+			result.WriteString(fmt.Sprintf("\n%s└─ Object with %d properties:", indentStr, len(obj)))
+			count := 0
+			for key, val := range obj {
+				if count < 3 { // Show first 3 properties
+					result.WriteString(fmt.Sprintf("\n%s   %s: %v", indentStr, key, formatValue(val)))
+					count++
+				} else if count == 3 {
+					result.WriteString(fmt.Sprintf("\n%s   ... and %d more properties", indentStr, len(obj)-3))
+					break
+				}
+			}
+			return result.String()
+		}
+		return fmt.Sprintf("%v", value)
+	}
+}
+
+func formatAgentPoolProfiles(value interface{}, indent int) string {
+	indentStr := strings.Repeat("  ", indent)
+	var result strings.Builder
+
+	if pools, ok := value.([]interface{}); ok {
+		result.WriteString(fmt.Sprintf("\n%s└─ %d Agent Pool(s):", indentStr, len(pools)))
+
+		for i, pool := range pools {
+			if poolMap, ok := pool.(map[string]interface{}); ok {
+				result.WriteString(fmt.Sprintf("\n%s   [%d] Pool Configuration:", indentStr, i+1))
+
+				// Show important pool properties
+				if name, exists := poolMap["name"]; exists {
+					result.WriteString(fmt.Sprintf("\n%s       Name: %v", indentStr, name))
+				}
+				if count, exists := poolMap["count"]; exists {
+					result.WriteString(fmt.Sprintf("\n%s       Node Count: %v", indentStr, count))
+				}
+				if vmSize, exists := poolMap["vmSize"]; exists {
+					result.WriteString(fmt.Sprintf("\n%s       VM Size: %v", indentStr, vmSize))
+				}
+				if osType, exists := poolMap["osType"]; exists {
+					result.WriteString(fmt.Sprintf("\n%s       OS Type: %v", indentStr, osType))
+				}
+				if mode, exists := poolMap["mode"]; exists {
+					result.WriteString(fmt.Sprintf("\n%s       Mode: %v", indentStr, mode))
+				}
+			}
+		}
+	} else {
+		result.WriteString(fmt.Sprintf("%v", value))
+	}
+
+	return result.String()
+}
+
+func formatSubnets(value interface{}, indent int) string {
+	indentStr := strings.Repeat("  ", indent)
+	var result strings.Builder
+
+	if subnets, ok := value.([]interface{}); ok {
+		result.WriteString(fmt.Sprintf("\n%s└─ %d Subnet(s):", indentStr, len(subnets)))
+
+		for i, subnet := range subnets {
+			if subnetMap, ok := subnet.(map[string]interface{}); ok {
+				result.WriteString(fmt.Sprintf("\n%s   [%d] Subnet:", indentStr, i+1))
+
+				if name, exists := subnetMap["name"]; exists {
+					result.WriteString(fmt.Sprintf("\n%s       Name: %v", indentStr, name))
+				}
+				if addressPrefix, exists := subnetMap["addressPrefix"]; exists {
+					result.WriteString(fmt.Sprintf("\n%s       Address Prefix: %v", indentStr, addressPrefix))
+				}
+			}
+		}
+	} else {
+		result.WriteString(fmt.Sprintf("%v", value))
+	}
+
+	return result.String()
+}
+
+func formatEndpoints(value interface{}, indent int) string {
+	indentStr := strings.Repeat("  ", indent)
+	var result strings.Builder
+
+	if endpoints, ok := value.(map[string]interface{}); ok {
+		result.WriteString(fmt.Sprintf("\n%s└─ Endpoints:", indentStr))
+
+		for name, endpoint := range endpoints {
+			result.WriteString(fmt.Sprintf("\n%s   %s: %v", indentStr, name, endpoint))
+		}
+	} else {
+		result.WriteString(fmt.Sprintf("%v", value))
+	}
+
+	return result.String()
+}
+
+func formatValue(value interface{}) string {
+	switch v := value.(type) {
+	case string:
+		if len(v) > 50 {
+			return v[:47] + "..."
+		}
+		return v
+	default:
+		str := fmt.Sprintf("%v", v)
+		if len(str) > 50 {
+			return str[:47] + "..."
+		}
+		return str
+	}
+}
+
+// max returns the maximum of two integers
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// renderScrollableContent applies scrolling to content and adds scroll indicators
+func (m model) renderScrollableContent(content string, maxHeight int) string {
+	lines := strings.Split(content, "\n")
+	totalLines := len(lines)
+
+	// Calculate visible range
+	startLine := m.rightPanelScrollOffset
+	endLine := startLine + maxHeight
+	if endLine > totalLines {
+		endLine = totalLines
+	}
+	if startLine >= totalLines {
+		startLine = totalLines - 1
+	}
+	if startLine < 0 {
+		startLine = 0
+	}
+
+	// Get visible content
+	var visibleLines []string
+	if startLine < endLine {
+		visibleLines = lines[startLine:endLine]
+	}
+
+	// Add scroll indicators
+	result := strings.Join(visibleLines, "\n")
+	if totalLines > maxHeight {
+		scrollIndicator := fmt.Sprintf(" [%d-%d/%d]", startLine+1, endLine, totalLines)
+		if startLine > 0 {
+			result = "↑ More above ↑" + scrollIndicator + "\n" + result
+		}
+		if endLine < totalLines {
+			result = result + "\n↓ More below ↓"
+		}
+	}
+
 	return result
 }
 
