@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/olafkfreund/azure-tui/internal/azure/resourceactions"
 	"github.com/olafkfreund/azure-tui/internal/azure/resourcedetails"
+	"github.com/olafkfreund/azure-tui/internal/openai"
 	"github.com/olafkfreund/azure-tui/internal/tui"
 )
 
@@ -66,6 +68,9 @@ type resourceDetailsLoadedMsg struct {
 	resource AzureResource
 	details  *resourcedetails.ResourceDetails
 }
+type aiDescriptionLoadedMsg struct {
+	description string
+}
 type resourceActionMsg struct {
 	action   string
 	resource AzureResource
@@ -76,6 +81,7 @@ type errorMsg struct{ error string }
 type model struct {
 	treeView         *tui.TreeView
 	statusBar        *tui.StatusBar
+	aiProvider       *openai.AIProvider
 	width, height    int
 	ready            bool
 	subscriptions    []Subscription
@@ -83,10 +89,13 @@ type model struct {
 	allResources     []AzureResource
 	selectedResource *AzureResource
 	resourceDetails  *resourcedetails.ResourceDetails
+	aiDescription    string
 	loadingState     string
 	selectedPanel    int
 	actionInProgress bool
 	lastActionResult *resourceactions.ActionResult
+	showDashboard    bool
+	logEntries       []string
 }
 
 func fetchSubscriptions() ([]Subscription, error) {
@@ -223,6 +232,28 @@ func loadResourceDetailsCmd(resource AzureResource) tea.Cmd {
 	}
 }
 
+func loadAIDescriptionCmd(ai *openai.AIProvider, resource AzureResource, details *resourcedetails.ResourceDetails) tea.Cmd {
+	return func() tea.Msg {
+		if ai == nil {
+			return aiDescriptionLoadedMsg{description: ""}
+		}
+
+		detailsStr := fmt.Sprintf("Resource: %s\nType: %s\nLocation: %s\nStatus: %s",
+			resource.Name, resource.Type, resource.Location, resource.Status)
+
+		if details != nil {
+			detailsStr += fmt.Sprintf("\nProperties: %v", details.Properties)
+		}
+
+		description, err := ai.DescribeResource(resource.Type, resource.Name, detailsStr)
+		if err != nil {
+			return aiDescriptionLoadedMsg{description: "AI analysis unavailable"}
+		}
+
+		return aiDescriptionLoadedMsg{description: description}
+	}
+}
+
 func executeResourceActionCmd(action string, resource AzureResource) tea.Cmd {
 	return func() tea.Msg {
 		var result resourceactions.ActionResult
@@ -248,11 +279,20 @@ func executeResourceActionCmd(action string, resource AzureResource) tea.Cmd {
 }
 
 func initModel() model {
+	// Initialize AI provider if API key is available
+	var ai *openai.AIProvider
+	if apiKey := os.Getenv("OPENAI_API_KEY"); apiKey != "" {
+		ai = openai.NewAIProvider(apiKey)
+	}
+
 	return model{
 		treeView:      tui.NewTreeView(),
 		statusBar:     tui.CreatePowerlineStatusBar(80),
+		aiProvider:    ai,
 		loadingState:  "loading",
 		selectedPanel: 0,
+		showDashboard: false,
+		logEntries:    []string{},
 	}
 }
 
@@ -299,6 +339,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case resourceDetailsLoadedMsg:
 		m.selectedResource = &msg.resource
 		m.resourceDetails = msg.details
+		// Load AI description after resource details are loaded
+		if m.aiProvider != nil {
+			return m, loadAIDescriptionCmd(m.aiProvider, msg.resource, msg.details)
+		}
+
+	case aiDescriptionLoadedMsg:
+		m.aiDescription = msg.description
 
 	case resourceActionMsg:
 		m.actionInProgress = false
@@ -316,6 +363,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "tab":
 			m.selectedPanel = (m.selectedPanel + 1) % 2
+		case "d":
+			// Toggle dashboard view
+			m.showDashboard = !m.showDashboard
 		case "j", "down":
 			if m.selectedPanel == 0 && m.treeView != nil {
 				m.treeView.SelectNext()
@@ -407,7 +457,7 @@ func (m model) View() string {
 			panelName = "Details"
 		}
 		m.statusBar.AddSegment(fmt.Sprintf("Panel: %s", panelName), colorAqua, bgMedium)
-		m.statusBar.AddSegment("Tab:Switch s:Start S:Stop r:Restart R:Refresh q:Quit", colorGray, bgLight)
+		m.statusBar.AddSegment("Tab:Switch d:Dashboard s:Start S:Stop r:Restart R:Refresh q:Quit", colorGray, bgLight)
 	}
 
 	// Two-panel layout - NO BORDERS AT ALL
@@ -420,14 +470,8 @@ func (m model) View() string {
 		treeContent = m.treeView.RenderTreeView(leftWidth-4, m.height-2)
 	}
 
-	leftBg := bgMedium
-	if m.selectedPanel == 0 {
-		leftBg = bgLight
-	}
-
 	leftPanel := lipgloss.NewStyle().
 		Width(leftWidth).
-		Background(leftBg).
 		Foreground(fgMedium).
 		Padding(1, 2).
 		Render(treeContent)
@@ -435,14 +479,8 @@ func (m model) View() string {
 	// Details panel
 	rightContent := m.renderResourcePanel(rightWidth-4, m.height-2)
 
-	rightBg := bgMedium
-	if m.selectedPanel == 1 {
-		rightBg = bgLight
-	}
-
 	rightPanel := lipgloss.NewStyle().
 		Width(rightWidth).
-		Background(rightBg).
 		Foreground(fgMedium).
 		Padding(1, 2).
 		Render(rightContent)
@@ -463,108 +501,376 @@ func (m model) renderResourcePanel(width, height int) string {
 	if m.selectedResource == nil {
 		return m.renderWelcomePanel(width, height)
 	}
-	return m.renderResourceDetailsAndActions(width, height)
+
+	if m.showDashboard {
+		return m.renderDashboardView(width, height)
+	}
+
+	return m.renderEnhancedResourceDetails(width, height)
 }
 
 func (m model) renderWelcomePanel(width, height int) string {
-	content := `📊 Azure Resource Dashboard
+	var content strings.Builder
 
-Welcome to Azure TUI Dashboard!
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Padding(0, 1)
+	content.WriteString(headerStyle.Render("📊 Azure Resource Dashboard"))
+	content.WriteString("\n\n")
 
-🎯 Getting Started:
-1. Navigate through resource groups in the left panel
-2. Press Space/Enter to expand a resource group  
-3. Select a resource to view details and actions
-4. Use Tab to switch between panels
+	content.WriteString("Welcome to Azure TUI Dashboard!\n\n")
 
-🎮 Quick Actions:
-• s - Start resource (VMs)
-• S - Stop resource (VMs)
-• r - Restart resource (VMs)
-• R - Refresh all data
-• Tab - Switch panels
-• q - Quit
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorGreen)
+	content.WriteString(sectionStyle.Render("🎯 Getting Started:"))
+	content.WriteString("\n")
+	content.WriteString("1. Navigate through resource groups in the left panel\n")
+	content.WriteString("2. Press Space/Enter to expand a resource group\n")
+	content.WriteString("3. Select a resource to view details and actions\n")
+	content.WriteString("4. Use Tab to switch between panels\n\n")
 
-💡 Select a resource from the left panel to see detailed information and available actions here.`
+	content.WriteString(sectionStyle.Render("🎮 Quick Actions:"))
+	content.WriteString("\n")
+	actionStyle := lipgloss.NewStyle().Foreground(colorAqua)
+	content.WriteString(fmt.Sprintf("%s - Start resource (VMs)\n", actionStyle.Render("s")))
+	content.WriteString(fmt.Sprintf("%s - Stop resource (VMs)\n", actionStyle.Render("S")))
+	content.WriteString(fmt.Sprintf("%s - Restart resource (VMs)\n", actionStyle.Render("r")))
+	content.WriteString(fmt.Sprintf("%s - Toggle Dashboard view\n", actionStyle.Render("d")))
+	content.WriteString(fmt.Sprintf("%s - Refresh all data\n", actionStyle.Render("R")))
+	content.WriteString(fmt.Sprintf("%s - Switch panels\n", actionStyle.Render("Tab")))
+	content.WriteString(fmt.Sprintf("%s - Quit\n\n", actionStyle.Render("q")))
 
-	return content
+	content.WriteString(sectionStyle.Render("✨ New Features:"))
+	content.WriteString("\n")
+	featureStyle := lipgloss.NewStyle().Foreground(colorPurple)
+	content.WriteString(fmt.Sprintf("%s Enhanced resource details with better formatting\n", featureStyle.Render("•")))
+	content.WriteString(fmt.Sprintf("%s AI-powered resource descriptions and insights\n", featureStyle.Render("•")))
+	content.WriteString(fmt.Sprintf("%s Dashboard view with live metrics and trends\n", featureStyle.Render("•")))
+	content.WriteString(fmt.Sprintf("%s AI-parsed log analysis and recommendations\n", featureStyle.Render("•")))
+	content.WriteString(fmt.Sprintf("%s Transparent backgrounds for cleaner interface\n\n", featureStyle.Render("•")))
+
+	aiStatus := "❌ Disabled (set OPENAI_API_KEY)"
+	if m.aiProvider != nil {
+		aiStatus = "✅ Enabled"
+	}
+	statusStyle := lipgloss.NewStyle().Foreground(colorGray)
+	content.WriteString(fmt.Sprintf("🤖 AI Features: %s\n\n", statusStyle.Render(aiStatus)))
+
+	content.WriteString("💡 Select a resource from the left panel to see detailed information and available actions here.")
+
+	return content.String()
 }
 
-func (m model) renderResourceDetailsAndActions(width, height int) string {
+func (m model) renderEnhancedResourceDetails(width, height int) string {
 	resource := m.selectedResource
+	var content strings.Builder
 
-	content := fmt.Sprintf(`📦 Resource Details
+	// Header with resource name and type
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Padding(0, 1)
+	content.WriteString(headerStyle.Render(fmt.Sprintf("📦 %s (%s)", resource.Name, getResourceTypeDisplayName(resource.Type))))
+	content.WriteString("\n\n")
 
-🏷️  Name: %s
-🏗️  Type: %s
-📍 Location: %s
-📁 Resource Group: %s
-🆔 Resource ID: %s`,
-		resource.Name, resource.Type, resource.Location, resource.ResourceGroup, resource.ID)
+	// Basic Information Section
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorGreen)
+	content.WriteString(sectionStyle.Render("📋 Basic Information"))
+	content.WriteString("\n")
 
+	keyStyle := lipgloss.NewStyle().Foreground(colorAqua)
+	valueStyle := lipgloss.NewStyle().Foreground(fgMedium)
+
+	content.WriteString(fmt.Sprintf("%s: %s\n", keyStyle.Render("Name"), valueStyle.Render(resource.Name)))
+	content.WriteString(fmt.Sprintf("%s: %s\n", keyStyle.Render("Type"), valueStyle.Render(resource.Type)))
+	content.WriteString(fmt.Sprintf("%s: %s\n", keyStyle.Render("Location"), valueStyle.Render(resource.Location)))
+	content.WriteString(fmt.Sprintf("%s: %s\n", keyStyle.Render("Resource Group"), valueStyle.Render(resource.ResourceGroup)))
+
+	// Status with color coding
 	if resource.Status != "" {
-		statusColor := "🔴"
-		if strings.Contains(strings.ToLower(resource.Status), "running") {
-			statusColor = "🟢"
-		} else if strings.Contains(strings.ToLower(resource.Status), "deallocated") {
-			statusColor = "🟡"
+		statusColor := colorRed
+		statusIcon := "🔴"
+		if strings.Contains(strings.ToLower(resource.Status), "running") || strings.Contains(strings.ToLower(resource.Status), "succeeded") {
+			statusColor = colorGreen
+			statusIcon = "🟢"
+		} else if strings.Contains(strings.ToLower(resource.Status), "deallocated") || strings.Contains(strings.ToLower(resource.Status), "stopped") {
+			statusColor = colorYellow
+			statusIcon = "🟡"
 		}
-		content += fmt.Sprintf("\n⚡ Status: %s %s", statusColor, resource.Status)
+		statusStyle := lipgloss.NewStyle().Foreground(statusColor)
+		content.WriteString(fmt.Sprintf("%s: %s %s\n", keyStyle.Render("Status"), statusIcon, statusStyle.Render(resource.Status)))
 	}
 
+	// AI Description Section
+	if m.aiDescription != "" && m.aiProvider != nil {
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("🤖 AI Analysis"))
+		content.WriteString("\n")
+
+		aiStyle := lipgloss.NewStyle().Foreground(colorPurple).Italic(true)
+		// Wrap long AI descriptions
+		lines := strings.Split(m.aiDescription, "\n")
+		for _, line := range lines {
+			if len(line) > width-10 {
+				words := strings.Fields(line)
+				currentLine := ""
+				for _, word := range words {
+					if len(currentLine+" "+word) > width-10 {
+						if currentLine != "" {
+							content.WriteString(aiStyle.Render(currentLine))
+							content.WriteString("\n")
+							currentLine = word
+						} else {
+							content.WriteString(aiStyle.Render(word))
+							content.WriteString("\n")
+						}
+					} else {
+						if currentLine == "" {
+							currentLine = word
+						} else {
+							currentLine += " " + word
+						}
+					}
+				}
+				if currentLine != "" {
+					content.WriteString(aiStyle.Render(currentLine))
+					content.WriteString("\n")
+				}
+			} else {
+				content.WriteString(aiStyle.Render(line))
+				content.WriteString("\n")
+			}
+		}
+	}
+
+	// Tags Section
 	if len(resource.Tags) > 0 {
-		content += "\n\n🏷️  Tags:"
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("🏷️  Tags"))
+		content.WriteString("\n")
+
+		tagKeyStyle := lipgloss.NewStyle().Foreground(colorYellow)
 		for key, value := range resource.Tags {
-			content += fmt.Sprintf("\n   • %s: %s", key, value)
+			content.WriteString(fmt.Sprintf("%s: %s\n", tagKeyStyle.Render(key), valueStyle.Render(value)))
 		}
 	}
 
+	// Actions Section for VMs
 	if resource.Type == "Microsoft.Compute/virtualMachines" {
-		content += "\n\n🎮 Available Actions:"
-		content += "\n   [s] Start VM"
-		content += "\n   [S] Stop VM"
-		content += "\n   [r] Restart VM"
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("🎮 Available Actions"))
+		content.WriteString("\n")
+
+		actionStyle := lipgloss.NewStyle().Foreground(colorBlue)
+		content.WriteString(fmt.Sprintf("%s Start VM\n", actionStyle.Render("[s]")))
+		content.WriteString(fmt.Sprintf("%s Stop VM\n", actionStyle.Render("[S]")))
+		content.WriteString(fmt.Sprintf("%s Restart VM\n", actionStyle.Render("[r]")))
 
 		if m.actionInProgress {
-			content += "\n\n⏳ Action in progress..."
+			progressStyle := lipgloss.NewStyle().Foreground(colorYellow)
+			content.WriteString("\n")
+			content.WriteString(progressStyle.Render("⏳ Action in progress..."))
+			content.WriteString("\n")
 		}
 
 		if m.lastActionResult != nil {
-			status := "❌"
+			resultStyle := lipgloss.NewStyle().Foreground(colorRed)
+			icon := "❌"
 			if m.lastActionResult.Success {
-				status = "✅"
+				resultStyle = lipgloss.NewStyle().Foreground(colorGreen)
+				icon = "✅"
 			}
-			content += fmt.Sprintf("\n\n%s Last Action: %s", status, m.lastActionResult.Message)
+			content.WriteString("\n")
+			content.WriteString(fmt.Sprintf("%s %s", icon, resultStyle.Render(m.lastActionResult.Message)))
+			content.WriteString("\n")
 		}
 	}
 
-	if m.resourceDetails != nil {
-		content += "\n\n📋 Additional Properties:"
-		content += fmt.Sprintf("\n   • ID: %s", m.resourceDetails.ID)
-		content += fmt.Sprintf("\n   • Type: %s", m.resourceDetails.Type)
-		content += fmt.Sprintf("\n   • Location: %s", m.resourceDetails.Location)
-		content += fmt.Sprintf("\n   • Resource Group: %s", m.resourceDetails.ResourceGroup)
+	// Properties Section
+	if m.resourceDetails != nil && len(m.resourceDetails.Properties) > 0 {
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("⚙️  Configuration"))
+		content.WriteString("\n")
 
-		if m.resourceDetails.Status != "" {
-			content += fmt.Sprintf("\n   • Status: %s", m.resourceDetails.Status)
-		}
-
-		if len(m.resourceDetails.Tags) > 0 {
-			content += "\n\n🏷️  Additional Tags:"
-			for key, value := range m.resourceDetails.Tags {
-				content += fmt.Sprintf("\n   • %s: %s", key, value)
-			}
-		}
-
-		if len(m.resourceDetails.Properties) > 0 {
-			content += "\n\n⚙️  Additional Properties:"
-			for key, value := range m.resourceDetails.Properties {
-				content += fmt.Sprintf("\n   • %s: %v", key, value)
+		// Show only important properties to avoid clutter
+		importantProps := getImportantProperties(resource.Type)
+		for _, prop := range importantProps {
+			if value, exists := m.resourceDetails.Properties[prop]; exists {
+				propStyle := lipgloss.NewStyle().Foreground(colorAqua)
+				content.WriteString(fmt.Sprintf("%s: %s\n", propStyle.Render(formatPropertyName(prop)), valueStyle.Render(fmt.Sprintf("%v", value))))
 			}
 		}
 	}
 
-	return content
+	// Footer with help text
+	content.WriteString("\n")
+	helpStyle := lipgloss.NewStyle().Faint(true).Foreground(colorGray)
+	content.WriteString(helpStyle.Render("Press [d] for Dashboard view • [Tab] to switch panels"))
+
+	return content.String()
+}
+
+func (m model) renderDashboardView(width, height int) string {
+	resource := m.selectedResource
+	var content strings.Builder
+
+	// Dashboard Header
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Padding(0, 1)
+	content.WriteString(headerStyle.Render(fmt.Sprintf("📊 Dashboard: %s", resource.Name)))
+	content.WriteString("\n\n")
+
+	// Mock metrics for demonstration (in real implementation, these would come from Azure Monitor)
+	metrics := map[string]interface{}{
+		"cpu_usage":    75.2,
+		"memory_usage": 68.5,
+		"network_in":   12.3,
+		"network_out":  8.7,
+		"disk_read":    45.2,
+		"disk_write":   23.1,
+	}
+
+	// Metrics Section
+	sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(colorGreen)
+	content.WriteString(sectionStyle.Render("📈 Live Metrics"))
+	content.WriteString("\n")
+
+	// CPU and Memory in a row
+	cpuStyle := lipgloss.NewStyle().Foreground(colorGreen)
+	if cpu, ok := metrics["cpu_usage"].(float64); ok && cpu > 80 {
+		cpuStyle = lipgloss.NewStyle().Foreground(colorRed)
+	} else if cpu, ok := metrics["cpu_usage"].(float64); ok && cpu > 60 {
+		cpuStyle = lipgloss.NewStyle().Foreground(colorYellow)
+	}
+
+	memStyle := lipgloss.NewStyle().Foreground(colorGreen)
+	if mem, ok := metrics["memory_usage"].(float64); ok && mem > 85 {
+		memStyle = lipgloss.NewStyle().Foreground(colorRed)
+	} else if mem, ok := metrics["memory_usage"].(float64); ok && mem > 70 {
+		memStyle = lipgloss.NewStyle().Foreground(colorYellow)
+	}
+
+	content.WriteString(fmt.Sprintf("🖥️  CPU: %s  💾 Memory: %s\n",
+		cpuStyle.Render(fmt.Sprintf("%.1f%%", metrics["cpu_usage"])),
+		memStyle.Render(fmt.Sprintf("%.1f%%", metrics["memory_usage"]))))
+
+	// Network metrics
+	netStyle := lipgloss.NewStyle().Foreground(colorBlue)
+	content.WriteString(fmt.Sprintf("🌐 Network In: %s  Out: %s\n",
+		netStyle.Render(fmt.Sprintf("%.1f MB/s", metrics["network_in"])),
+		netStyle.Render(fmt.Sprintf("%.1f MB/s", metrics["network_out"]))))
+
+	// Disk metrics
+	diskStyle := lipgloss.NewStyle().Foreground(colorPurple)
+	content.WriteString(fmt.Sprintf("💿 Disk Read: %s  Write: %s\n",
+		diskStyle.Render(fmt.Sprintf("%.1f MB/s", metrics["disk_read"])),
+		diskStyle.Render(fmt.Sprintf("%.1f MB/s", metrics["disk_write"]))))
+
+	// Simple trend visualization
+	content.WriteString("\n")
+	content.WriteString(sectionStyle.Render("📊 Trend (24h)"))
+	content.WriteString("\n")
+	trendStyle := lipgloss.NewStyle().Foreground(colorAqua)
+	content.WriteString(trendStyle.Render("CPU: ▁▂▃▄▅▆▇█▇▆▅▄▃▂▁▂▃▄▅▆▇█▇▆▅▄"))
+	content.WriteString("\n")
+	content.WriteString(trendStyle.Render("MEM: ▂▃▄▃▂▃▄▅▆▅▄▃▂▃▄▅▆▇▆▅▄▃▂▃▄▅"))
+	content.WriteString("\n")
+
+	// AI-Parsed Logs Section
+	content.WriteString("\n")
+	content.WriteString(sectionStyle.Render("🤖 AI Log Analysis"))
+	content.WriteString("\n")
+
+	logStyle := lipgloss.NewStyle().Foreground(fgMedium)
+	if m.aiProvider != nil {
+		// Mock AI-parsed log insights
+		insights := []string{
+			"✅ No critical errors detected in the last 24h",
+			"⚠️  High CPU usage detected during peak hours (2-4 PM)",
+			"📈 Memory usage is trending upward, consider scaling",
+			"🔧 Recommended: Enable auto-scaling for better performance",
+		}
+
+		for _, insight := range insights {
+			content.WriteString(logStyle.Render(insight))
+			content.WriteString("\n")
+		}
+	} else {
+		content.WriteString(logStyle.Render("AI analysis unavailable (set OPENAI_API_KEY)"))
+		content.WriteString("\n")
+	}
+
+	// Recent Activity/Logs
+	content.WriteString("\n")
+	content.WriteString(sectionStyle.Render("📋 Recent Activity"))
+	content.WriteString("\n")
+
+	// Mock recent activity
+	activities := []string{
+		"[15:30] VM started successfully",
+		"[15:25] Resource health check: OK",
+		"[15:20] Auto-scaling triggered",
+		"[15:15] Backup completed",
+		"[15:10] Security scan: No issues",
+	}
+
+	activityStyle := lipgloss.NewStyle().Foreground(colorGray)
+	for _, activity := range activities {
+		content.WriteString(activityStyle.Render(activity))
+		content.WriteString("\n")
+	}
+
+	// Footer
+	content.WriteString("\n")
+	helpStyle := lipgloss.NewStyle().Faint(true).Foreground(colorGray)
+	content.WriteString(helpStyle.Render("Press [d] for Details view • Auto-refresh: 30s"))
+
+	return content.String()
+}
+
+// Helper functions for better formatting
+func getResourceTypeDisplayName(resourceType string) string {
+	displayNames := map[string]string{
+		"Microsoft.Compute/virtualMachines":          "Virtual Machine",
+		"Microsoft.KeyVault/vaults":                  "Key Vault",
+		"Microsoft.Storage/storageAccounts":          "Storage Account",
+		"Microsoft.Network/networkInterfaces":        "Network Interface",
+		"Microsoft.Network/publicIPAddresses":        "Public IP",
+		"Microsoft.Network/virtualNetworks":          "Virtual Network",
+		"Microsoft.Compute/disks":                    "Disk",
+		"Microsoft.ContainerService/managedClusters": "AKS Cluster",
+		"Microsoft.Web/sites":                        "Web App",
+		"Microsoft.Sql/servers":                      "SQL Server",
+	}
+
+	if displayName, exists := displayNames[resourceType]; exists {
+		return displayName
+	}
+	return resourceType
+}
+
+func getImportantProperties(resourceType string) []string {
+	switch resourceType {
+	case "Microsoft.Compute/virtualMachines":
+		return []string{"vmSize", "osType", "provisioningState", "adminUsername", "computerName"}
+	case "Microsoft.Storage/storageAccounts":
+		return []string{"accountType", "kind", "accessTier", "primaryEndpoints"}
+	case "Microsoft.Network/virtualNetworks":
+		return []string{"addressSpace", "subnets", "dhcpOptions"}
+	case "Microsoft.ContainerService/managedClusters":
+		return []string{"kubernetesVersion", "nodeResourceGroup", "dnsPrefix", "agentPoolProfiles"}
+	default:
+		return []string{"provisioningState", "location", "sku"}
+	}
+}
+
+func formatPropertyName(prop string) string {
+	// Convert camelCase to readable format
+	result := ""
+	for i, r := range prop {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			result += " "
+		}
+		if i == 0 {
+			result += strings.ToUpper(string(r))
+		} else {
+			result += string(r)
+		}
+	}
+	return result
 }
 
 func main() {

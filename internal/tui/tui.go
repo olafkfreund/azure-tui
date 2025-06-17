@@ -303,10 +303,6 @@ func (tv *TreeView) RenderTreeView(width, height int) string {
 	style := lipgloss.NewStyle().
 		Width(width).
 		Height(height).
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("63")).
-		Background(lipgloss.Color("236")).
-		Foreground(lipgloss.Color("252")).
 		Padding(1, 1)
 
 	var lines []string
@@ -505,14 +501,14 @@ func (sb *StatusBar) RenderStatusBar() string {
 
 // RenderPopup renders a popup window for alarms/errors
 func RenderPopup(msg PopupMsg) string {
-	border := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2)
+	style := lipgloss.NewStyle().Padding(1, 2)
 	title := msg.Title
 	if msg.Level == "error" {
 		title = "❌ " + title
 	} else if msg.Level == "alarm" {
 		title = "⚠️  " + title
 	}
-	return border.Render(fmt.Sprintf("%s\n\n%s", title, msg.Content))
+	return style.Render(fmt.Sprintf("%s\n\n%s", title, msg.Content))
 }
 
 // RenderMatrixGraph renders a simple ASCII matrix/graph
@@ -565,7 +561,7 @@ func RenderShortcutsPopup(shortcuts map[string]string) string {
 	for k, v := range shortcuts {
 		b.WriteString(fmt.Sprintf("%-8s : %s\n", k, v))
 	}
-	return lipgloss.NewStyle().Width(50).Height(20).Align(lipgloss.Center, lipgloss.Center).Border(lipgloss.RoundedBorder()).Render(b.String())
+	return lipgloss.NewStyle().Width(50).Height(20).Align(lipgloss.Center, lipgloss.Center).Padding(1).Render(b.String())
 }
 
 // RenderTabsWithActive renders a tab bar with the active tab highlighted, supporting a main (non-closable) tab and resource tabs with Azure icons.
@@ -715,7 +711,7 @@ func RenderMetricsDashboard(resourceName string, metrics map[string]interface{})
 
 	// Add a simple ASCII graph for trending
 	dashboard.WriteString("\n")
-	trendStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Border(lipgloss.RoundedBorder()).Padding(1)
+	trendStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8")).Padding(1)
 	trendContent := "CPU Trend (24h):\n"
 	trendContent += "▁▂▃▄▅▆▇█▇▆▅▄▃▂▁▂▃▄▅▆▇█▇▆▅▄"
 	dashboard.WriteString(trendStyle.Render(trendContent))
@@ -806,7 +802,7 @@ func RenderEditDialog(resourceName, resourceType string, currentConfig map[strin
 
 // RenderDeleteConfirmation renders a confirmation dialog for resource deletion
 func RenderDeleteConfirmation(resourceName, resourceType string) string {
-	style := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1).Foreground(lipgloss.Color("9"))
+	style := lipgloss.NewStyle().Padding(1).Foreground(lipgloss.Color("9"))
 	content := fmt.Sprintf("⚠️  Delete Resource\n\nAre you sure you want to delete:\n\nName: %s\nType: %s\n\nThis action cannot be undone!\n\nPress 'y' to confirm, 'n' to cancel", resourceName, resourceType)
 	return style.Render(content)
 }
@@ -815,7 +811,7 @@ func RenderDeleteConfirmation(resourceName, resourceType string) string {
 func RenderStructuredResourceDetails(details map[string]interface{}) string {
 	var content strings.Builder
 
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Background(lipgloss.Color("236")).Padding(0, 2)
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Padding(0, 2)
 	content.WriteString(headerStyle.Render("📋 Resource Details"))
 	content.WriteString("\n\n")
 
@@ -902,12 +898,12 @@ func RenderStructuredResourceDetails(details map[string]interface{}) string {
 func RenderEnhancedMetricsDashboard(resourceName string, metrics map[string]interface{}, trends map[string][]float64) string {
 	var dashboard strings.Builder
 
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Background(lipgloss.Color("236")).Padding(0, 2)
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Padding(0, 2)
 	dashboard.WriteString(headerStyle.Render(fmt.Sprintf("📊 Live Metrics: %s", resourceName)))
 	dashboard.WriteString("\n\n")
 
 	// Current Metrics Row
-	metricsStyle := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1).Margin(0, 1)
+	metricsStyle := lipgloss.NewStyle().Padding(1).Margin(0, 1)
 
 	// CPU Section
 	cpuContent := "🖥️  CPU Usage\n"
