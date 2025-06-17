@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/olafkfreund/azure-tui/internal/azure/network"
 	"github.com/olafkfreund/azure-tui/internal/azure/resourceactions"
 	"github.com/olafkfreund/azure-tui/internal/azure/resourcedetails"
 	"github.com/olafkfreund/azure-tui/internal/openai"
@@ -78,6 +79,17 @@ type resourceActionMsg struct {
 }
 type errorMsg struct{ error string }
 
+// Network dashboard message types
+type networkDashboardMsg struct{ content string }
+type vnetDetailsMsg struct{ content string }
+type nsgDetailsMsg struct{ content string }
+type networkTopologyMsg struct{ content string }
+type networkAIAnalysisMsg struct{ content string }
+type networkResourceCreatedMsg struct {
+	resourceType string
+	result       resourceactions.ActionResult
+}
+
 type model struct {
 	treeView               *tui.TreeView
 	statusBar              *tui.StatusBar
@@ -99,9 +111,16 @@ type model struct {
 	showDashboard          bool
 	logEntries             []string
 	// New navigation fields
-	activeView            string          // "details", "dashboard", "welcome"
+	activeView            string          // "details", "dashboard", "welcome", "network-dashboard", "vnet-details", "nsg-details", "network-topology", "network-ai"
 	propertyExpandedIndex int             // For navigating expanded properties
 	expandedProperties    map[string]bool // Track which properties are expanded
+
+	// Network-specific fields
+	networkDashboardContent string
+	vnetDetailsContent      string
+	nsgDetailsContent       string
+	networkTopologyContent  string
+	networkAIContent        string
 }
 
 func fetchSubscriptions() ([]Subscription, error) {
@@ -312,6 +331,103 @@ func executeResourceActionCmd(action string, resource AzureResource) tea.Cmd {
 	}
 }
 
+// =============================================================================
+// NETWORK DASHBOARD AND MANAGEMENT COMMANDS
+// =============================================================================
+
+// showNetworkDashboardCmd displays comprehensive network dashboard
+func showNetworkDashboardCmd() tea.Cmd {
+	return func() tea.Msg {
+		// Use the network package's RenderNetworkDashboard function
+		dashboardContent := network.RenderNetworkDashboard()
+		return networkDashboardMsg{content: dashboardContent}
+	}
+}
+
+// showVNetDetailsCmd displays detailed VNet information
+func showVNetDetailsCmd(vnetName, resourceGroup string) tea.Cmd {
+	return func() tea.Msg {
+		// Use the network package's RenderVNetDetails function
+		vnetContent := network.RenderVNetDetails(vnetName, resourceGroup)
+		return vnetDetailsMsg{content: vnetContent}
+	}
+}
+
+// showNSGDetailsCmd displays detailed NSG information
+func showNSGDetailsCmd(nsgName, resourceGroup string) tea.Cmd {
+	return func() tea.Msg {
+		// Use the network package's RenderNSGDetails function
+		nsgContent := network.RenderNSGDetails(nsgName, resourceGroup)
+		return nsgDetailsMsg{content: nsgContent}
+	}
+}
+
+// showNetworkTopologyCmd displays network topology view
+func showNetworkTopologyCmd() tea.Cmd {
+	return func() tea.Msg {
+		// Use the network package's RenderNetworkTopology function
+		topologyContent := network.RenderNetworkTopology()
+		return networkTopologyMsg{content: topologyContent}
+	}
+}
+
+// showNetworkAIAnalysisCmd provides AI-powered network analysis
+func showNetworkAIAnalysisCmd() tea.Cmd {
+	return func() tea.Msg {
+		// Use the network package's RenderNetworkAIAnalysis function
+		aiContent := network.RenderNetworkAIAnalysis()
+		return networkAIAnalysisMsg{content: aiContent}
+	}
+}
+
+// createNetworkResourceCmd creates network resources
+func createNetworkResourceCmd(resourceType string) tea.Cmd {
+	return func() tea.Msg {
+		var result resourceactions.ActionResult
+
+		switch resourceType {
+		case "vnet":
+			result = resourceactions.ActionResult{
+				Success: true,
+				Message: "VNet creation wizard would open here. Use Azure CLI: az network vnet create",
+				Output:  "Ready to create Virtual Network",
+			}
+		case "nsg":
+			result = resourceactions.ActionResult{
+				Success: true,
+				Message: "NSG creation wizard would open here. Use Azure CLI: az network nsg create",
+				Output:  "Ready to create Network Security Group",
+			}
+		case "subnet":
+			result = resourceactions.ActionResult{
+				Success: true,
+				Message: "Subnet creation wizard would open here. Use Azure CLI: az network vnet subnet create",
+				Output:  "Ready to create Subnet",
+			}
+		case "publicip":
+			result = resourceactions.ActionResult{
+				Success: true,
+				Message: "Public IP creation wizard would open here. Use Azure CLI: az network public-ip create",
+				Output:  "Ready to create Public IP",
+			}
+		case "loadbalancer":
+			result = resourceactions.ActionResult{
+				Success: true,
+				Message: "Load Balancer creation wizard would open here. Use Azure CLI: az network lb create",
+				Output:  "Ready to create Load Balancer",
+			}
+		default:
+			result = resourceactions.ActionResult{
+				Success: false,
+				Message: fmt.Sprintf("Unknown network resource type: %s", resourceType),
+				Output:  "",
+			}
+		}
+
+		return networkResourceCreatedMsg{resourceType: resourceType, result: result}
+	}
+}
+
 func initModel() model {
 	// Initialize AI provider if API key is available
 	var ai *openai.AIProvider
@@ -392,6 +508,35 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.result.Success && m.selectedResource != nil {
 			return m, loadResourceDetailsCmd(*m.selectedResource)
 		}
+
+	case networkDashboardMsg:
+		m.actionInProgress = false
+		m.networkDashboardContent = msg.content
+		m.activeView = "network-dashboard"
+
+	case vnetDetailsMsg:
+		m.actionInProgress = false
+		m.vnetDetailsContent = msg.content
+		m.activeView = "vnet-details"
+
+	case nsgDetailsMsg:
+		m.actionInProgress = false
+		m.nsgDetailsContent = msg.content
+		m.activeView = "nsg-details"
+
+	case networkTopologyMsg:
+		m.actionInProgress = false
+		m.networkTopologyContent = msg.content
+		m.activeView = "network-topology"
+
+	case networkAIAnalysisMsg:
+		m.actionInProgress = false
+		m.networkAIContent = msg.content
+		m.activeView = "network-ai"
+
+	case networkResourceCreatedMsg:
+		m.actionInProgress = false
+		m.logEntries = append(m.logEntries, fmt.Sprintf("Created %s: %s", msg.resourceType, msg.result.Message))
 
 	case errorMsg:
 		m.loadingState = "error"
@@ -532,6 +677,68 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.actionInProgress = true
 				return m, executeResourceActionCmd("services", *m.selectedResource)
 			}
+		case "N":
+			// Show comprehensive network dashboard
+			if !m.actionInProgress {
+				m.actionInProgress = true
+				return m, showNetworkDashboardCmd()
+			}
+		case "V":
+			// Show VNet details for selected network resource
+			if m.selectedResource != nil && !m.actionInProgress && strings.Contains(m.selectedResource.Type, "Network") {
+				if strings.Contains(m.selectedResource.Type, "virtualNetworks") {
+					m.actionInProgress = true
+					return m, showVNetDetailsCmd(m.selectedResource.Name, m.selectedResource.ResourceGroup)
+				}
+			}
+		case "G":
+			// Show NSG details for selected network security group
+			if m.selectedResource != nil && !m.actionInProgress && strings.Contains(m.selectedResource.Type, "networkSecurityGroups") {
+				m.actionInProgress = true
+				return m, showNSGDetailsCmd(m.selectedResource.Name, m.selectedResource.ResourceGroup)
+			}
+		case "Z":
+			// Show network topology view
+			if !m.actionInProgress {
+				m.actionInProgress = true
+				return m, showNetworkTopologyCmd()
+			}
+		case "A":
+			// Show AI-powered network analysis
+			if !m.actionInProgress {
+				m.actionInProgress = true
+				return m, showNetworkAIAnalysisCmd()
+			}
+		case "C":
+			// Create VNet action for network resources
+			if !m.actionInProgress {
+				m.actionInProgress = true
+				return m, createNetworkResourceCmd("vnet")
+			}
+		case "ctrl+n":
+			// Create NSG action
+			if !m.actionInProgress {
+				m.actionInProgress = true
+				return m, createNetworkResourceCmd("nsg")
+			}
+		case "ctrl+s":
+			// Create subnet action
+			if !m.actionInProgress {
+				m.actionInProgress = true
+				return m, createNetworkResourceCmd("subnet")
+			}
+		case "ctrl+p":
+			// Create public IP action
+			if !m.actionInProgress {
+				m.actionInProgress = true
+				return m, createNetworkResourceCmd("publicip")
+			}
+		case "ctrl+l":
+			// Create load balancer action
+			if !m.actionInProgress {
+				m.actionInProgress = true
+				return m, createNetworkResourceCmd("loadbalancer")
+			}
 		case "R":
 			return m, loadDataCmd()
 		}
@@ -657,6 +864,21 @@ func (m model) View() string {
 }
 
 func (m model) renderResourcePanel(width, height int) string {
+	// Handle network-specific views first
+	switch m.activeView {
+	case "network-dashboard":
+		return m.networkDashboardContent
+	case "vnet-details":
+		return m.vnetDetailsContent
+	case "nsg-details":
+		return m.nsgDetailsContent
+	case "network-topology":
+		return m.networkTopologyContent
+	case "network-ai":
+		return m.networkAIContent
+	}
+
+	// Handle regular resource views
 	if m.selectedResource == nil {
 		return m.renderWelcomePanel(width, height)
 	}
@@ -696,12 +918,29 @@ func (m model) renderWelcomePanel(width, height int) string {
 	content.WriteString(fmt.Sprintf("%s - Switch panels\n", actionStyle.Render("Tab")))
 	content.WriteString(fmt.Sprintf("%s - Quit\n\n", actionStyle.Render("q")))
 
+	content.WriteString(sectionStyle.Render("🌐 Network Management:"))
+	content.WriteString("\n")
+	networkStyle := lipgloss.NewStyle().Foreground(colorBlue)
+	content.WriteString(fmt.Sprintf("%s - Network Dashboard\n", networkStyle.Render("N")))
+	content.WriteString(fmt.Sprintf("%s - VNet Details (for VNets)\n", networkStyle.Render("V")))
+	content.WriteString(fmt.Sprintf("%s - NSG Details (for NSGs)\n", networkStyle.Render("G")))
+	content.WriteString(fmt.Sprintf("%s - Network Topology\n", networkStyle.Render("Z")))
+	content.WriteString(fmt.Sprintf("%s - AI Network Analysis\n", networkStyle.Render("A")))
+	content.WriteString(fmt.Sprintf("%s - Create VNet\n", networkStyle.Render("C")))
+	content.WriteString(fmt.Sprintf("%s - Create NSG\n", networkStyle.Render("Ctrl+N")))
+	content.WriteString(fmt.Sprintf("%s - Create Subnet\n", networkStyle.Render("Ctrl+S")))
+	content.WriteString(fmt.Sprintf("%s - Create Public IP\n", networkStyle.Render("Ctrl+P")))
+	content.WriteString(fmt.Sprintf("%s - Create Load Balancer\n\n", networkStyle.Render("Ctrl+L")))
+
 	content.WriteString(sectionStyle.Render("✨ New Features:"))
 	content.WriteString("\n")
 	featureStyle := lipgloss.NewStyle().Foreground(colorPurple)
 	content.WriteString(fmt.Sprintf("%s Enhanced resource details with better formatting\n", featureStyle.Render("•")))
 	content.WriteString(fmt.Sprintf("%s AI-powered resource descriptions and insights\n", featureStyle.Render("•")))
 	content.WriteString(fmt.Sprintf("%s Dashboard view with live metrics and trends\n", featureStyle.Render("•")))
+	content.WriteString(fmt.Sprintf("%s Comprehensive network resource management\n", featureStyle.Render("•")))
+	content.WriteString(fmt.Sprintf("%s Network topology visualization and analysis\n", featureStyle.Render("•")))
+	content.WriteString(fmt.Sprintf("%s Terraform/Bicep code generation for networks\n", featureStyle.Render("•")))
 	content.WriteString(fmt.Sprintf("%s AI-parsed log analysis and recommendations\n", featureStyle.Render("•")))
 	content.WriteString(fmt.Sprintf("%s Transparent backgrounds for cleaner interface\n\n", featureStyle.Render("•")))
 

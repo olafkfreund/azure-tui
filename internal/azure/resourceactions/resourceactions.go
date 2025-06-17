@@ -510,6 +510,20 @@ func GetResourceActions(resourceType string) []string {
 		actions = []string{"backup", "scale", "connect", "security"}
 	case strings.Contains(resourceType, "Microsoft.Storage/storageAccounts"):
 		actions = []string{"browse", "keys", "backup", "metrics"}
+	case strings.Contains(resourceType, "Microsoft.Network/virtualNetworks"):
+		actions = []string{"create", "delete", "peering"}
+	case strings.Contains(resourceType, "Microsoft.Network/networkSecurityGroups"):
+		actions = []string{"create", "delete", "rule", "associate"}
+	case strings.Contains(resourceType, "Microsoft.Network/routeTables"):
+		actions = []string{"create", "delete", "route"}
+	case strings.Contains(resourceType, "Microsoft.Network/publicIPAddresses"):
+		actions = []string{"create", "delete"}
+	case strings.Contains(resourceType, "Microsoft.Network/loadBalancers"):
+		actions = []string{"create", "delete"}
+	case strings.Contains(resourceType, "Microsoft.Network/networkInterfaces"):
+		actions = []string{"create", "delete"}
+	case strings.Contains(resourceType, "Microsoft.Network/networkWatchers"):
+		actions = []string{"enable", "test-connectivity"}
 	default:
 		actions = []string{"view", "edit", "delete"}
 	}
@@ -594,11 +608,452 @@ func ExecuteResourceAction(action, resourceType, resourceName, resourceGroup str
 		if strings.Contains(resourceType, "Microsoft.ContainerService/managedClusters") {
 			return GetAKSNodes(resourceName, resourceGroup)
 		}
+	case "create":
+		if strings.Contains(resourceType, "Microsoft.Network/virtualNetworks") {
+			location := params["location"].(string)
+			addressPrefixes := params["addressPrefixes"].([]string)
+			return CreateVirtualNetworkAction(resourceName, resourceGroup, location, addressPrefixes)
+		} else if strings.Contains(resourceType, "Microsoft.Network/networkSecurityGroups") {
+			location := params["location"].(string)
+			return CreateNetworkSecurityGroupAction(resourceName, resourceGroup, location)
+		} else if strings.Contains(resourceType, "Microsoft.Network/routeTables") {
+			location := params["location"].(string)
+			return CreateRouteTableAction(resourceName, resourceGroup, location)
+		} else if strings.Contains(resourceType, "Microsoft.Network/publicIPAddresses") {
+			location := params["location"].(string)
+			allocationMethod := params["allocationMethod"].(string)
+			sku := params["sku"].(string)
+			return CreatePublicIPAction(resourceName, resourceGroup, location, allocationMethod, sku)
+		} else if strings.Contains(resourceType, "Microsoft.Network/loadBalancers") {
+			location := params["location"].(string)
+			sku := params["sku"].(string)
+			publicIPName := params["publicIPName"].(string)
+			return CreateLoadBalancerAction(resourceName, resourceGroup, location, sku, publicIPName)
+		} else if strings.Contains(resourceType, "Microsoft.Network/networkInterfaces") {
+			location := params["location"].(string)
+			subnetID := params["subnetID"].(string)
+			publicIPName := params["publicIPName"].(string)
+			nsgName := params["nsgName"].(string)
+			return CreateNetworkInterfaceAction(resourceName, resourceGroup, location, subnetID, publicIPName, nsgName)
+		}
+	case "delete":
+		if strings.Contains(resourceType, "Microsoft.Network/virtualNetworks") {
+			return DeleteVirtualNetworkAction(resourceName, resourceGroup)
+		}
+	case "rule":
+		if strings.Contains(resourceType, "Microsoft.Network/networkSecurityGroups") {
+			ruleName := params["ruleName"].(string)
+			priority := params["priority"].(int)
+			direction := params["direction"].(string)
+			access := params["access"].(string)
+			protocol := params["protocol"].(string)
+			sourcePort := params["sourcePort"].(string)
+			destPort := params["destPort"].(string)
+			sourceAddress := params["sourceAddress"].(string)
+			destAddress := params["destAddress"].(string)
+			return AddSecurityRuleAction(resourceName, resourceGroup, ruleName, priority, direction, access, protocol, sourcePort, destPort, sourceAddress, destAddress)
+		}
+	case "associate":
+		if strings.Contains(resourceType, "Microsoft.Network/networkSecurityGroups") {
+			subnetName := params["subnetName"].(string)
+			vnetName := params["vnetName"].(string)
+			nsgName := params["nsgName"].(string)
+			return AssociateNSGWithSubnetAction(subnetName, vnetName, resourceGroup, nsgName)
+		}
+	case "route":
+		if strings.Contains(resourceType, "Microsoft.Network/routeTables") {
+			routeName := params["routeName"].(string)
+			addressPrefix := params["addressPrefix"].(string)
+			nextHopType := params["nextHopType"].(string)
+			nextHopAddress := params["nextHopAddress"].(string)
+			return AddRouteAction(resourceName, resourceGroup, routeName, addressPrefix, nextHopType, nextHopAddress)
+		}
+	case "enable":
+		if strings.Contains(resourceType, "Microsoft.Network/networkWatchers") {
+			location := params["location"].(string)
+			return EnableNetworkWatcherAction(resourceGroup, location)
+		}
+	case "test-connectivity":
+		if strings.Contains(resourceType, "Microsoft.Network/networkWatchers") {
+			sourceResourceID := params["sourceResourceID"].(string)
+			destResourceID := params["destResourceID"].(string)
+			return TestNetworkConnectivityAction(sourceResourceID, destResourceID)
+		}
+	case "peering":
+		if strings.Contains(resourceType, "Microsoft.Network/virtualNetworks") {
+			localVNet := params["localVNet"].(string)
+			localResourceGroup := params["localResourceGroup"].(string)
+			remoteVNet := params["remoteVNet"].(string)
+			remoteResourceGroup := params["remoteResourceGroup"].(string)
+			return CreateVNetPeeringAction(localVNet, localResourceGroup, remoteVNet, remoteResourceGroup)
+		}
 	}
 
 	return ActionResult{
 		Success: false,
 		Message: fmt.Sprintf("Action '%s' not supported for resource type '%s'", action, resourceType),
 		Output:  "",
+	}
+}
+
+// =============================================================================
+// NETWORK RESOURCE ACTIONS
+// =============================================================================
+
+// CreateVirtualNetworkAction creates a new virtual network
+func CreateVirtualNetworkAction(name, resourceGroup, location string, addressPrefixes []string) ActionResult {
+	args := []string{"network", "vnet", "create", "--name", name, "--resource-group", resourceGroup, "--location", location}
+
+	if len(addressPrefixes) > 0 {
+		args = append(args, "--address-prefixes")
+		args = append(args, addressPrefixes...)
+	} else {
+		args = append(args, "--address-prefix", "10.0.0.0/16")
+	}
+
+	cmd := exec.Command("az", args...)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create VNet '%s': %v", name, err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("Virtual Network '%s' created successfully", name),
+		Output:  string(output),
+	}
+}
+
+// DeleteVirtualNetworkAction deletes a virtual network
+func DeleteVirtualNetworkAction(name, resourceGroup string) ActionResult {
+	cmd := exec.Command("az", "network", "vnet", "delete", "--name", name, "--resource-group", resourceGroup, "--yes")
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to delete VNet '%s': %v", name, err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("Virtual Network '%s' deleted successfully", name),
+		Output:  string(output),
+	}
+}
+
+// CreateSubnetAction creates a new subnet in a virtual network
+func CreateSubnetAction(name, vnetName, resourceGroup, addressPrefix string) ActionResult {
+	cmd := exec.Command("az", "network", "vnet", "subnet", "create",
+		"--name", name,
+		"--vnet-name", vnetName,
+		"--resource-group", resourceGroup,
+		"--address-prefix", addressPrefix)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create subnet '%s': %v", name, err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("Subnet '%s' created successfully in VNet '%s'", name, vnetName),
+		Output:  string(output),
+	}
+}
+
+// CreateNetworkSecurityGroupAction creates a new network security group
+func CreateNetworkSecurityGroupAction(name, resourceGroup, location string) ActionResult {
+	cmd := exec.Command("az", "network", "nsg", "create", "--name", name, "--resource-group", resourceGroup, "--location", location)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create NSG '%s': %v", name, err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("Network Security Group '%s' created successfully", name),
+		Output:  string(output),
+	}
+}
+
+// AddSecurityRuleAction adds a new security rule to an NSG
+func AddSecurityRuleAction(nsgName, resourceGroup, ruleName string, priority int, direction, access, protocol, sourcePort, destPort, sourceAddress, destAddress string) ActionResult {
+	cmd := exec.Command("az", "network", "nsg", "rule", "create",
+		"--nsg-name", nsgName,
+		"--resource-group", resourceGroup,
+		"--name", ruleName,
+		"--priority", fmt.Sprintf("%d", priority),
+		"--direction", direction,
+		"--access", access,
+		"--protocol", protocol,
+		"--source-port-ranges", sourcePort,
+		"--destination-port-ranges", destPort,
+		"--source-address-prefixes", sourceAddress,
+		"--destination-address-prefixes", destAddress)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to add security rule '%s': %v", ruleName, err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("Security rule '%s' added to NSG '%s' successfully", ruleName, nsgName),
+		Output:  string(output),
+	}
+}
+
+// AssociateNSGWithSubnetAction associates an NSG with a subnet
+func AssociateNSGWithSubnetAction(subnetName, vnetName, resourceGroup, nsgName string) ActionResult {
+	nsgID := fmt.Sprintf("/subscriptions/$(az account show --query id -o tsv)/resourceGroups/%s/providers/Microsoft.Network/networkSecurityGroups/%s", resourceGroup, nsgName)
+	cmd := exec.Command("az", "network", "vnet", "subnet", "update",
+		"--name", subnetName,
+		"--vnet-name", vnetName,
+		"--resource-group", resourceGroup,
+		"--network-security-group", nsgID)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to associate NSG '%s' with subnet '%s': %v", nsgName, subnetName, err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("NSG '%s' associated with subnet '%s' successfully", nsgName, subnetName),
+		Output:  string(output),
+	}
+}
+
+// CreateRouteTableAction creates a new route table
+func CreateRouteTableAction(name, resourceGroup, location string) ActionResult {
+	cmd := exec.Command("az", "network", "route-table", "create", "--name", name, "--resource-group", resourceGroup, "--location", location)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create route table '%s': %v", name, err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("Route table '%s' created successfully", name),
+		Output:  string(output),
+	}
+}
+
+// AddRouteAction adds a new route to a route table
+func AddRouteAction(routeTableName, resourceGroup, routeName, addressPrefix, nextHopType, nextHopAddress string) ActionResult {
+	args := []string{"network", "route-table", "route", "create",
+		"--route-table-name", routeTableName,
+		"--resource-group", resourceGroup,
+		"--name", routeName,
+		"--address-prefix", addressPrefix,
+		"--next-hop-type", nextHopType}
+
+	if nextHopAddress != "" {
+		args = append(args, "--next-hop-ip-address", nextHopAddress)
+	}
+
+	cmd := exec.Command("az", args...)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to add route '%s': %v", routeName, err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("Route '%s' added to route table '%s' successfully", routeName, routeTableName),
+		Output:  string(output),
+	}
+}
+
+// CreatePublicIPAction creates a new public IP address
+func CreatePublicIPAction(name, resourceGroup, location, allocationMethod, sku string) ActionResult {
+	cmd := exec.Command("az", "network", "public-ip", "create",
+		"--name", name,
+		"--resource-group", resourceGroup,
+		"--location", location,
+		"--allocation-method", allocationMethod,
+		"--sku", sku)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create public IP '%s': %v", name, err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("Public IP '%s' created successfully", name),
+		Output:  string(output),
+	}
+}
+
+// CreateLoadBalancerAction creates a new load balancer
+func CreateLoadBalancerAction(name, resourceGroup, location, sku, publicIPName string) ActionResult {
+	args := []string{"network", "lb", "create",
+		"--name", name,
+		"--resource-group", resourceGroup,
+		"--location", location,
+		"--sku", sku}
+
+	if publicIPName != "" {
+		args = append(args, "--public-ip-address", publicIPName)
+	}
+
+	cmd := exec.Command("az", args...)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create load balancer '%s': %v", name, err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("Load balancer '%s' created successfully", name),
+		Output:  string(output),
+	}
+}
+
+// CreateNetworkInterfaceAction creates a new network interface
+func CreateNetworkInterfaceAction(name, resourceGroup, location, subnetID, publicIPName, nsgName string) ActionResult {
+	args := []string{"network", "nic", "create",
+		"--name", name,
+		"--resource-group", resourceGroup,
+		"--location", location,
+		"--subnet", subnetID}
+
+	if publicIPName != "" {
+		args = append(args, "--public-ip-address", publicIPName)
+	}
+
+	if nsgName != "" {
+		args = append(args, "--network-security-group", nsgName)
+	}
+
+	cmd := exec.Command("az", args...)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create network interface '%s': %v", name, err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("Network interface '%s' created successfully", name),
+		Output:  string(output),
+	}
+}
+
+// EnableNetworkWatcherAction enables Network Watcher for monitoring
+func EnableNetworkWatcherAction(resourceGroup, location string) ActionResult {
+	cmd := exec.Command("az", "network", "watcher", "configure", "--resource-group", resourceGroup, "--locations", location, "--enabled", "true")
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to enable Network Watcher: %v", err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: "Network Watcher enabled successfully",
+		Output:  string(output),
+	}
+}
+
+// TestNetworkConnectivityAction tests connectivity between network resources
+func TestNetworkConnectivityAction(sourceResourceID, destResourceID string) ActionResult {
+	cmd := exec.Command("az", "network", "watcher", "test-connectivity",
+		"--source-resource", sourceResourceID,
+		"--dest-resource", destResourceID)
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to test connectivity: %v", err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: "Network connectivity test completed",
+		Output:  string(output),
+	}
+}
+
+// CreateVNetPeeringAction creates VNet peering between two virtual networks
+func CreateVNetPeeringAction(localVNet, localResourceGroup, remoteVNet, remoteResourceGroup string) ActionResult {
+	remoteVNetID := fmt.Sprintf("/subscriptions/$(az account show --query id -o tsv)/resourceGroups/%s/providers/Microsoft.Network/virtualNetworks/%s", remoteResourceGroup, remoteVNet)
+
+	cmd := exec.Command("az", "network", "vnet", "peering", "create",
+		"--name", fmt.Sprintf("%s-to-%s", localVNet, remoteVNet),
+		"--vnet-name", localVNet,
+		"--resource-group", localResourceGroup,
+		"--remote-vnet", remoteVNetID,
+		"--allow-vnet-access")
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to create VNet peering: %v", err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("VNet peering created between '%s' and '%s'", localVNet, remoteVNet),
+		Output:  string(output),
 	}
 }
