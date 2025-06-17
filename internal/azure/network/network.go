@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"sort"
+	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	ai "github.com/olafkfreund/azure-tui/internal/openai"
 	"github.com/olafkfreund/azure-tui/internal/tui"
 )
@@ -895,13 +898,254 @@ func RenderNSGDetails(nsgName, resourceGroup string) string {
 		})
 	}
 
-	rows := [][]string{}
+	// Build comprehensive NSG analysis with multiple sections
+	var result strings.Builder
 
-	// Headers
-	rows = append(rows, []string{"Rule Name", "Priority", "Direction", "Access", "Protocol", "Source", "Destination", "Ports"})
+	// Header
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
+	result.WriteString(headerStyle.Render(fmt.Sprintf("🔒 Network Security Group: %s", nsgName)))
+	result.WriteString("\n\n")
 
-	// Security rules
-	for _, rule := range nsg.SecurityRules {
+	// Basic Information
+	result.WriteString("📋 Basic Information:\n")
+	result.WriteString(fmt.Sprintf("• Resource Group: %s\n", nsg.ResourceGroup))
+	result.WriteString(fmt.Sprintf("• Location: %s\n", nsg.Location))
+	result.WriteString(fmt.Sprintf("• Total Rules: %d\n", len(nsg.SecurityRules)))
+	result.WriteString(fmt.Sprintf("• Associated Subnets: %d\n", len(nsg.Subnets)))
+	result.WriteString(fmt.Sprintf("• Associated NICs: %d\n\n", len(nsg.NetworkInterfaces)))
+
+	// Open Ports Analysis Table
+	result.WriteString("🌐 Open Ports Analysis:\n")
+	result.WriteString("=" + strings.Repeat("=", 80) + "\n")
+
+	openPorts := extractOpenPorts(nsg.SecurityRules)
+	if len(openPorts) > 0 {
+		portsTable := generateOpenPortsTable(openPorts)
+		result.WriteString(portsTable)
+	} else {
+		result.WriteString("No open inbound ports found (all traffic blocked by default).\n")
+	}
+	result.WriteString("\n")
+
+	// Security Rules Table
+	result.WriteString("📜 Security Rules Details:\n")
+	result.WriteString("=" + strings.Repeat("=", 80) + "\n")
+
+	rulesTable := generateSecurityRulesTable(nsg.SecurityRules)
+	result.WriteString(rulesTable)
+
+	// Security Analysis
+	result.WriteString("\n🛡️  Security Analysis:\n")
+	analysis := analyzeNSGSecurity(nsg.SecurityRules)
+	result.WriteString(analysis)
+
+	return result.String()
+}
+
+// extractOpenPorts analyzes security rules to find open inbound ports
+func extractOpenPorts(rules []SecurityRule) []OpenPortInfo {
+	var openPorts []OpenPortInfo
+
+	for _, rule := range rules {
+		if rule.Direction == "Inbound" && rule.Access == "Allow" {
+			ports := parsePortRange(rule.DestinationPortRange)
+			for _, port := range ports {
+				openPort := OpenPortInfo{
+					Port:        port,
+					Protocol:    rule.Protocol,
+					Source:      rule.SourceAddressPrefix,
+					RuleName:    rule.Name,
+					Priority:    rule.Priority,
+					Description: generatePortDescription(port, rule.Protocol),
+				}
+				openPorts = append(openPorts, openPort)
+			}
+		}
+	}
+
+	// Sort by port number
+	sort.Slice(openPorts, func(i, j int) bool {
+		return openPorts[i].Port < openPorts[j].Port
+	})
+
+	return openPorts
+}
+
+// OpenPortInfo represents information about an open port
+type OpenPortInfo struct {
+	Port        int
+	Protocol    string
+	Source      string
+	RuleName    string
+	Priority    int
+	Description string
+}
+
+// parsePortRange converts port range strings to individual ports
+func parsePortRange(portRange string) []int {
+	var ports []int
+
+	if portRange == "*" {
+		// For wildcard, we'll show common ports
+		return []int{} // Return empty for wildcard to avoid listing all ports
+	}
+
+	// Handle single port
+	if !strings.Contains(portRange, "-") && !strings.Contains(portRange, ",") {
+		if port, err := strconv.Atoi(portRange); err == nil {
+			ports = append(ports, port)
+		}
+		return ports
+	}
+
+	// Handle comma-separated ports
+	if strings.Contains(portRange, ",") {
+		portStrs := strings.Split(portRange, ",")
+		for _, portStr := range portStrs {
+			if port, err := strconv.Atoi(strings.TrimSpace(portStr)); err == nil {
+				ports = append(ports, port)
+			}
+		}
+		return ports
+	}
+
+	// Handle port ranges (e.g., "80-90")
+	if strings.Contains(portRange, "-") {
+		parts := strings.Split(portRange, "-")
+		if len(parts) == 2 {
+			start, err1 := strconv.Atoi(strings.TrimSpace(parts[0]))
+			end, err2 := strconv.Atoi(strings.TrimSpace(parts[1]))
+			if err1 == nil && err2 == nil && end-start <= 20 { // Limit range display
+				for i := start; i <= end; i++ {
+					ports = append(ports, i)
+				}
+			}
+		}
+	}
+
+	return ports
+}
+
+// generatePortDescription provides common service descriptions for well-known ports
+func generatePortDescription(port int, protocol string) string {
+	commonPorts := map[int]string{
+		22:    "SSH",
+		23:    "Telnet",
+		25:    "SMTP",
+		53:    "DNS",
+		80:    "HTTP",
+		110:   "POP3",
+		143:   "IMAP",
+		443:   "HTTPS",
+		993:   "IMAPS",
+		995:   "POP3S",
+		21:    "FTP",
+		20:    "FTP Data",
+		3389:  "RDP",
+		3306:  "MySQL",
+		5432:  "PostgreSQL",
+		1433:  "SQL Server",
+		6379:  "Redis",
+		27017: "MongoDB",
+		8080:  "HTTP Alt",
+		8443:  "HTTPS Alt",
+		9090:  "Prometheus",
+		9091:  "HTTP Proxy",
+		4040:  "Spark UI",
+		8088:  "Hadoop ResourceManager",
+		50070: "Hadoop NameNode",
+	}
+
+	if service, exists := commonPorts[port]; exists {
+		return fmt.Sprintf("%s (%s)", service, protocol)
+	}
+
+	return fmt.Sprintf("Custom (%s)", protocol)
+}
+
+// generateOpenPortsTable creates a formatted table of open ports
+func generateOpenPortsTable(openPorts []OpenPortInfo) string {
+	var table strings.Builder
+
+	// Table headers
+	table.WriteString(fmt.Sprintf("%-6s %-10s %-20s %-20s %-10s %-25s\n",
+		"Port", "Protocol", "Source", "Rule Name", "Priority", "Service"))
+	table.WriteString(strings.Repeat("-", 95) + "\n")
+
+	// Group ports by source for better readability
+	sourceGroups := make(map[string][]OpenPortInfo)
+	for _, port := range openPorts {
+		sourceGroups[port.Source] = append(sourceGroups[port.Source], port)
+	}
+
+	// Render each source group
+	for source, ports := range sourceGroups {
+		// Source header
+		sourceStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("33"))
+		if source == "*" || source == "0.0.0.0/0" || source == "Internet" {
+			sourceStyle = sourceStyle.Foreground(lipgloss.Color("9")) // Red for public access
+		}
+
+		for _, port := range ports {
+			portColor := lipgloss.Color("10") // Green by default
+
+			// Highlight potentially risky ports
+			riskyPorts := map[int]bool{
+				22: true, 23: true, 3389: true, 21: true, 135: true, 445: true,
+			}
+
+			if riskyPorts[port.Port] && (source == "*" || source == "0.0.0.0/0") {
+				portColor = lipgloss.Color("9") // Red for risky public ports
+			} else if port.Port < 1024 {
+				portColor = lipgloss.Color("11") // Yellow for privileged ports
+			}
+
+			portStyle := lipgloss.NewStyle().Foreground(portColor)
+
+			table.WriteString(fmt.Sprintf("%-6s %-10s %-20s %-20s %-10d %-25s\n",
+				portStyle.Render(fmt.Sprintf("%d", port.Port)),
+				port.Protocol,
+				truncateString(source, 18),
+				truncateString(port.RuleName, 18),
+				port.Priority,
+				port.Description))
+		}
+	}
+
+	return table.String()
+}
+
+// generateSecurityRulesTable creates a formatted table of all security rules
+func generateSecurityRulesTable(rules []SecurityRule) string {
+	var table strings.Builder
+
+	// Table headers
+	table.WriteString(fmt.Sprintf("%-20s %-8s %-9s %-6s %-8s %-15s %-15s %-10s\n",
+		"Rule Name", "Priority", "Direction", "Access", "Protocol", "Source", "Destination", "Ports"))
+	table.WriteString(strings.Repeat("-", 110) + "\n")
+
+	// Sort rules by priority
+	sortedRules := make([]SecurityRule, len(rules))
+	copy(sortedRules, rules)
+	sort.Slice(sortedRules, func(i, j int) bool {
+		return sortedRules[i].Priority < sortedRules[j].Priority
+	})
+
+	for _, rule := range sortedRules {
+		// Color coding based on rule properties
+		accessColor := lipgloss.Color("10") // Green for Allow
+		if rule.Access == "Deny" {
+			accessColor = lipgloss.Color("9") // Red for Deny
+		}
+
+		directionColor := lipgloss.Color("12") // Blue for Outbound
+		if rule.Direction == "Inbound" {
+			directionColor = lipgloss.Color("13") // Magenta for Inbound
+		}
+
+		accessStyle := lipgloss.NewStyle().Foreground(accessColor)
+		directionStyle := lipgloss.NewStyle().Foreground(directionColor)
+
 		sourceInfo := rule.SourceAddressPrefix
 		if rule.SourcePortRange != "*" {
 			sourceInfo += fmt.Sprintf(":%s", rule.SourcePortRange)
@@ -912,23 +1156,105 @@ func RenderNSGDetails(nsgName, resourceGroup string) string {
 			destInfo += fmt.Sprintf(":%s", rule.DestinationPortRange)
 		}
 
-		rows = append(rows, []string{
-			rule.Name,
-			fmt.Sprintf("%d", rule.Priority),
-			rule.Direction,
-			rule.Access,
+		table.WriteString(fmt.Sprintf("%-20s %-8d %-9s %-6s %-8s %-15s %-15s %-10s\n",
+			truncateString(rule.Name, 18),
+			rule.Priority,
+			directionStyle.Render(rule.Direction),
+			accessStyle.Render(rule.Access),
 			rule.Protocol,
-			sourceInfo,
-			destInfo,
-			rule.DestinationPortRange,
-		})
+			truncateString(sourceInfo, 13),
+			truncateString(destInfo, 13),
+			rule.DestinationPortRange))
 	}
 
-	return tui.RenderMatrixGraph(tui.MatrixGraphMsg{
-		Title:  fmt.Sprintf("🔒 Network Security Group: %s (%d rules)", nsgName, len(nsg.SecurityRules)),
-		Rows:   rows,
-		Labels: []string{"Rule", "Priority", "Direction", "Access", "Protocol", "Source", "Destination", "Ports"},
-	})
+	return table.String()
+}
+
+// analyzeNSGSecurity provides security analysis and recommendations
+func analyzeNSGSecurity(rules []SecurityRule) string {
+	var analysis strings.Builder
+
+	// Count rule types
+	var inboundAllow, inboundDeny, outboundAllow, outboundDeny int
+	var publicInboundPorts []int
+	var riskyRules []string
+
+	for _, rule := range rules {
+		if rule.Direction == "Inbound" {
+			if rule.Access == "Allow" {
+				inboundAllow++
+				// Check for public access
+				if rule.SourceAddressPrefix == "*" || rule.SourceAddressPrefix == "0.0.0.0/0" || rule.SourceAddressPrefix == "Internet" {
+					if rule.DestinationPortRange != "*" {
+						if port, err := strconv.Atoi(rule.DestinationPortRange); err == nil {
+							publicInboundPorts = append(publicInboundPorts, port)
+							// Check for risky ports
+							riskyPorts := []int{22, 23, 3389, 21, 135, 445, 1433, 3306, 5432, 6379, 27017}
+							for _, riskyPort := range riskyPorts {
+								if port == riskyPort {
+									riskyRules = append(riskyRules, fmt.Sprintf("%s (Port %d)", rule.Name, port))
+								}
+							}
+						}
+					}
+				}
+			} else {
+				inboundDeny++
+			}
+		} else {
+			if rule.Access == "Allow" {
+				outboundAllow++
+			} else {
+				outboundDeny++
+			}
+		}
+	}
+
+	// Security summary
+	analysis.WriteString(fmt.Sprintf("• Total Rules: %d (Inbound: %d Allow, %d Deny | Outbound: %d Allow, %d Deny)\n",
+		len(rules), inboundAllow, inboundDeny, outboundAllow, outboundDeny))
+	analysis.WriteString(fmt.Sprintf("• Public Inbound Ports: %d\n", len(publicInboundPorts)))
+
+	// Security recommendations
+	analysis.WriteString("\n🔍 Security Recommendations:\n")
+
+	if len(riskyRules) > 0 {
+		warningStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+		analysis.WriteString(warningStyle.Render("⚠️  HIGH RISK: "))
+		analysis.WriteString("The following rules allow public access to sensitive ports:\n")
+		for _, rule := range riskyRules {
+			analysis.WriteString(fmt.Sprintf("   • %s\n", rule))
+		}
+		analysis.WriteString("   → Recommendation: Restrict source to specific IP ranges\n\n")
+	}
+
+	if len(publicInboundPorts) > 5 {
+		cautionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+		analysis.WriteString(cautionStyle.Render("⚠️  MEDIUM RISK: "))
+		analysis.WriteString(fmt.Sprintf("Many ports (%d) are open to the internet\n", len(publicInboundPorts)))
+		analysis.WriteString("   → Recommendation: Review necessity of each public port\n\n")
+	}
+
+	if inboundDeny == 0 {
+		infoStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
+		analysis.WriteString(infoStyle.Render("ℹ️  INFO: "))
+		analysis.WriteString("No explicit deny rules found (relying on default deny)\n")
+		analysis.WriteString("   → Recommendation: Consider explicit deny rules for clarity\n\n")
+	}
+
+	successStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	analysis.WriteString(successStyle.Render("✅ GOOD: "))
+	analysis.WriteString("NSG is configured and active\n")
+
+	return analysis.String()
+}
+
+// truncateString truncates a string to the specified length
+func truncateString(s string, maxLength int) string {
+	if len(s) <= maxLength {
+		return s
+	}
+	return s[:maxLength-3] + "..."
 }
 
 // RenderNetworkTopology renders network topology and connections
