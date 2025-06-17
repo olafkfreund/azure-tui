@@ -3,11 +3,14 @@
 ## Table of Contents
 
 1. [Getting Started](#getting-started)
-2. [Interface Overview](#interface-overview)
+2. [Interface Overview](#interface-overview)  
 3. [Real-World Examples](#real-world-examples)
 4. [Advanced Features](#advanced-features)
 5. [Troubleshooting](#troubleshooting)
 6. [Best Practices](#best-practices)
+7. [Integration Examples](#integration-examples)
+
+**New in this version**: Enhanced navigation system with panel switching, property expansion, and improved AKS resource management.
 
 ---
 
@@ -55,9 +58,20 @@ DEMO_MODE=true ./aztui
 - `Space` - Expand/collapse resource groups
 - `Enter` - Open resource in content tab
 
+**Panel Navigation** *(NEW)*:
+
+- `h` or `←` - Move to left panel (Tree View)
+- `l` or `→` - Move to right panel (Details View)
+- `Tab` - Cycle between panels (Tree → Details → Tree)
+
+**Property Management** *(NEW)*:
+
+- `e` - Expand/collapse complex properties (AKS Agent Pools, etc.)
+- Context-sensitive scrolling in Details panel
+
 **Tab Management**:
 
-- `Tab` - Switch to next content tab
+- `Tab` - Switch to next content tab (when in tab content)
 - `Shift+Tab` - Switch to previous content tab
 - `Ctrl+W` - Close current content tab
 
@@ -72,27 +86,35 @@ DEMO_MODE=true ./aztui
 
 ## Interface Overview
 
-### Tree View Mode (Default)
+### Tree View Mode (Default) - Enhanced Navigation
 
 ```
 ┌─ Azure Resources ───────────────┐ ┌─ Resource Details ──────────────────┐
 │ ☁️  Azure Resources             │ │ 🖥️ my-production-vm               │
-│ ├─ 🗂️  prod-webapp-rg           │ │                                    │
+│ ├─ 🗂️  prod-webapp-rg  [ACTIVE]│ │                                    │
 │ │  ├─ 🌐 webapp-frontend        │ │ Name: my-production-vm             │
 │ │  ├─ 🗄️  webapp-database       │ │ Type: Microsoft.Compute/VM         │
 │ │  └─ 🔑 webapp-secrets         │ │ Location: West Europe              │
 │ ├─ 🗂️  dev-environment-rg       │ │ Resource Group: prod-webapp-rg     │
 │ │  ├─ 🖥️  dev-jumpbox           │ │ Status: Running                    │
 │ │  └─ 🚢 dev-k8s-cluster        │ │                                    │
-│ └─ 🗂️  monitoring-rg            │ │ Actions:                           │
-│    ├─ 📊 central-logs           │ │ • Press 'a' for AI analysis        │
-│    └─ 🚨 critical-alerts        │ │ • Press 'M' for metrics            │
-└─────────────────────────────────┘ │ • Press 'E' to edit                │
+│ └─ 🗂️  monitoring-rg            │ │ Agent Pool Profiles: 2 Agent Pool(s) [e to expand]
+│    ├─ 📊 central-logs           │ │                                    │
+│    └─ 🚨 critical-alerts        │ │ Actions:                           │
+└─[🔍 Tree] ─────────────────────┘ │ • Press 'a' for AI analysis        │
+                                     │ • Press 'M' for metrics            │
+                                     │ • Press 'E' to edit                │
                                      │ • Press 'T' for Terraform          │
-                                     └─────────────────────────────────────┘
-┌─ Status: ☁️ Production Subscription │ 🏢 Contoso Corp │ 📁 5 groups ──────┐
-└─────────────────────────────────────────────────────────────────────────┘
+                                     └─[📊 Details] ─────────────────────┘
+┌─ Status: Tree View │ h/l or ←/→ to switch panels │ e to expand properties ─┐
+└─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+**Panel Navigation Features**:
+- **Blue Border**: Active Tree panel - use j/k to navigate resources
+- **Green Border**: Active Details panel - use j/k to scroll content
+- **Property Expansion**: Press `e` to expand complex AKS properties
+- **Visual Indicators**: [ACTIVE] markers and colored borders show current focus
 
 ### Traditional Mode (F2 to toggle)
 
@@ -373,6 +395,87 @@ Recommendations:
 • Current load suggests good utilization of resources
 ```
 
+### Example 7: Enhanced Navigation and Property Management *(NEW)*
+
+**Scenario**: You need to explore an AKS cluster with complex configurations and navigate efficiently between different resources.
+
+```bash
+# Navigation Steps:
+1. Launch Azure TUI
+2. Navigate to AKS resource group using 'j/k'
+3. Press 'Space' to expand the resource group
+4. Navigate to AKS cluster using 'j/k'
+5. Press 'Enter' to open cluster details
+6. Use new navigation features to explore properties
+```
+
+**Enhanced Navigation Features**:
+
+```
+Current Panel: Tree View [🔍 Blue Border]
+├─ 🗂️  aks-production-rg  [ACTIVE]
+│  ├─ 🚢 my-aks-cluster
+│  ├─ 🔒 aks-identity
+│  └─ 🌐 aks-vnet
+
+Navigation Options:
+• h/← - Stay in Tree panel (current)
+• l/→ - Move to Details panel  
+• Tab - Cycle between panels
+• j/k - Navigate resources in tree
+```
+
+**Property Expansion Example**:
+
+```
+Details Panel: AKS Cluster [📊 Green Border]
+
+Name: my-aks-cluster
+Type: Microsoft.ContainerService/managedClusters
+Location: West Europe
+Resource Group: aks-production-rg
+Status: Running
+
+Agent Pool Profiles: 2 Agent Pool(s) [Press 'e' to expand]
+
+Actions:
+• Press 'e' to expand Agent Pools
+• Press 'a' for AI analysis
+• Press 'j/k' to scroll content
+```
+
+**After pressing 'e' to expand**:
+
+```
+Agent Pool Profiles: [Expanded]
+  Pool 1: nodepool1
+    ├─ VM Size: Standard_D4s_v3
+    ├─ Count: 3 nodes
+    ├─ OS Type: Linux
+    ├─ Availability Zones: [1, 2, 3]
+    └─ Auto Scaling: Enabled (min: 1, max: 10)
+  
+  Pool 2: userpool
+    ├─ VM Size: Standard_D8s_v3  
+    ├─ Count: 2 nodes
+    ├─ OS Type: Linux
+    ├─ Availability Zones: [1, 2]
+    └─ Auto Scaling: Disabled
+
+Network Profile:
+  ├─ Network Plugin: kubenet
+  ├─ Service CIDR: 10.0.0.0/16
+  └─ DNS Service IP: 10.0.0.10
+
+[Press 'e' again to collapse]
+```
+
+**Key Navigation Benefits**:
+- **Immediate Visual Feedback**: Colored borders show active panel
+- **Context-Sensitive Controls**: j/k behavior adapts to current panel
+- **Property Management**: Complex properties become readable and navigable
+- **Efficient Exploration**: Quickly switch between tree navigation and detail review
+
 ---
 
 ## Advanced Features
@@ -438,9 +541,12 @@ ai:
 |----------|-----|--------|-------------|
 | **Navigation** | `j` or `↓` | Move Down | Navigate down in tree/list |
 | | `k` or `↑` | Move Up | Navigate up in tree/list |
+| | `h` or `←` | Left Panel | Move to Tree View panel |
+| | `l` or `→` | Right Panel | Move to Details View panel |
 | | `Space` | Expand/Collapse | Toggle tree node |
 | | `Enter` | Open Resource | Open in content tab |
-| **Tabs** | `Tab` | Next Tab | Switch to next content tab |
+| **Property Management** | `e` | Expand/Collapse | Toggle complex property expansion |
+| **Tabs** | `Tab` | Panel/Tab Cycle | Switch panels or content tabs |
 | | `Shift+Tab` | Previous Tab | Switch to previous tab |
 | | `Ctrl+W` | Close Tab | Close current content tab |
 | **Actions** | `a` | AI Analysis | Get AI insights |

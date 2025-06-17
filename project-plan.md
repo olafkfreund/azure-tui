@@ -4,6 +4,23 @@
 
 A comprehensive Go-based Terminal User Interface for Azure resource management featuring a **NeoVim-style interface**, AI-powered analysis, Infrastructure as Code generation, and professional resource management capabilities. The application provides both TUI and CLI interfaces with seamless Azure integration and intelligent automation.
 
+### 🧭 **Enhanced Navigation System (COMPLETED)**
+- ✅ **Left/Right Panel Navigation**: `h/←` and `l/→` keys for horizontal navigation
+- ✅ **Tab Key Panel Cycling**: Tab key switches between Tree and Details panels
+- ✅ **Visual Panel Indicators**: Colored rounded borders (Blue for Tree, Green for Details)
+- ✅ **Context-Sensitive j/k**: Tree navigation vs content scrolling based on active panel
+- ✅ **Property Expansion System**: `e` key to expand/collapse complex AKS properties
+- ✅ **Enhanced Status Bar**: Shows current panel and available actions contextually
+- ✅ **Immediate Visual Feedback**: Real-time border changes and navigation hints
+- ✅ **Specialized Property Formatting**: Custom formatters for Agent Pools, Subnets, etc.
+
+### 🎯 **AKS Properties Enhancement (COMPLETED)**
+- ✅ **Agent Pool Condensed View**: Shows "2 Agent Pool(s)" summary instead of raw JSON
+- ✅ **Expandable Properties**: Press `e` to toggle between summary and detailed views
+- ✅ **Hierarchical Property Display**: Proper indentation and structure for complex data
+- ✅ **Property State Management**: Tracks expansion state across navigation
+- ✅ **Smart Property Detection**: Automatic formatting for known complex properties
+
 ---
 
 ## ✅ **COMPLETED FEATURES (June 2025)**
@@ -29,6 +46,10 @@ A comprehensive Go-based Terminal User Interface for Azure resource management f
 - ✅ **Vim Navigation**: `j/k` keys, space for expand/collapse, familiar shortcuts
 - ✅ **Mouse Support**: Wheel scrolling and click interactions
 - ✅ **Interface Toggle**: `F2` to switch between tree view and traditional modes
+- ✅ **Enhanced Panel Navigation**: Left/right navigation with `h/l` and `←/→` keys
+- ✅ **Panel Visual Indicators**: Colored borders (Blue for Tree, Green for Details)
+- ✅ **Property Expansion System**: `e` key to expand/collapse complex properties
+- ✅ **Context-Sensitive Navigation**: Smart j/k behavior based on active panel
 
 ### 🤖 **AI-Powered Features**
 - ✅ **Resource Analysis** (`a`): Comprehensive AI insights and recommendations
@@ -71,11 +92,12 @@ A comprehensive Go-based Terminal User Interface for Azure resource management f
 
 ### 🎯 **IMMEDIATE PRIORITIES (Current Sprint)**
 
-1. **📖 Enhanced Documentation**
-   - **User Manual Completion**: Real-world usage examples and scenarios
-   - **AI Workflow Guide**: Step-by-step AI integration tutorials  
-   - **Configuration Guide**: Complete YAML config documentation
-   - **Troubleshooting Guide**: Common issues and solutions
+1. **📖 Enhanced Documentation** ✅ *COMPLETED*
+   - ✅ **User Manual Completion**: Real-world usage examples and scenarios
+   - ✅ **AI Workflow Guide**: Step-by-step AI integration tutorials  
+   - ✅ **Configuration Guide**: Complete YAML config documentation
+   - ✅ **Troubleshooting Guide**: Common issues and solutions
+   - ✅ **Navigation Enhancement Documentation**: Updated with new features
 
 2. **🧪 Testing & Quality Assurance**
    - **Integration Tests**: Azure CLI and SDK integration testing
@@ -191,6 +213,40 @@ The Azure TUI has successfully achieved its core objectives:
 - **🎯 User Experience**: Intuitive keyboard navigation and visual feedback
 
 The application transforms Azure resource management from a web-based experience to a powerful, keyboard-driven terminal interface that developers and DevOps professionals will love using daily.
+
+---
+
+## 📋 **RECENT COMPLETIONS (June 2025)**
+
+### 🧭 **Navigation Enhancement Update - COMPLETED**
+*Completion Date: June 17, 2025*
+
+**Major Features Added**:
+- ✅ **Horizontal Panel Navigation**: `h/←` and `l/→` keys for seamless left/right movement
+- ✅ **Visual Panel Indicators**: Blue borders for Tree panel, Green borders for Details panel
+- ✅ **Property Expansion System**: `e` key to expand/collapse complex AKS properties
+- ✅ **Context-Sensitive Navigation**: Smart j/k behavior adapting to active panel
+- ✅ **Enhanced Status Bar**: Real-time panel information and navigation hints
+- ✅ **Tab Key Enhancement**: Intelligent panel cycling with visual feedback
+
+**Technical Improvements**:
+- ✅ **Specialized Property Formatters**: Custom handling for Agent Pools, Subnets, Endpoints
+- ✅ **Property State Management**: Tracks expansion states across navigation sessions
+- ✅ **Immediate Visual Feedback**: Real-time border changes and contextual hints
+- ✅ **Enhanced Content Scrolling**: Proper scrolling behavior in Details panel
+
+**User Experience Enhancements**:
+- ✅ **AKS Properties Readability**: Complex JSON transformed to readable summaries
+- ✅ **Navigation Clarity**: Always visible current panel and available actions
+- ✅ **Keyboard Efficiency**: Intuitive vim-style navigation extended horizontally
+- ✅ **Professional Styling**: Consistent rounded borders and modern UI elements
+
+**Documentation Updates**:
+- ✅ **Manual.md Enhanced**: New navigation examples and comprehensive guides
+- ✅ **Project Plan Updated**: Current completion status and roadmap adjustments
+- ✅ **Feature Documentation**: Complete navigation enhancement documentation
+
+This enhancement significantly improves the user experience for exploring complex Azure resources, making AKS cluster management and property inspection highly efficient and visually intuitive.
 
 ---
 
