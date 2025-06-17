@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -1160,4 +1161,218 @@ func generateTrendGraph(data []float64, width int, maxValue float64) string {
 	}
 
 	return trend.String()
+}
+
+// TableData represents data for table formatting
+type TableData struct {
+	Headers []string
+	Rows    [][]string
+	Title   string
+}
+
+// formatPropertyName formats property names for display
+func formatPropertyName(prop string) string {
+	// Convert camelCase to Title Case
+	result := ""
+	for i, r := range prop {
+		if i > 0 && r >= 'A' && r <= 'Z' {
+			result += " "
+		}
+		if i == 0 {
+			result += strings.ToUpper(string(r))
+		} else {
+			result += string(r)
+		}
+	}
+	return result
+}
+
+// formatValue formats interface{} values for display
+func formatValue(value interface{}) string {
+	if value == nil {
+		return "null"
+	}
+
+	switch v := value.(type) {
+	case string:
+		return v
+	case bool:
+		if v {
+			return "✓ Yes"
+		}
+		return "✗ No"
+	case float64:
+		return fmt.Sprintf("%.2f", v)
+	case int:
+		return fmt.Sprintf("%d", v)
+	case []interface{}:
+		return fmt.Sprintf("Array (%d items)", len(v))
+	case map[string]interface{}:
+		return fmt.Sprintf("Object (%d properties)", len(v))
+	default:
+		str := fmt.Sprintf("%v", v)
+		if len(str) > 100 {
+			return str[:97] + "..."
+		}
+		return str
+	}
+}
+
+// RenderTable renders data in a clean, borderless table format
+func RenderTable(data TableData) string {
+	if len(data.Rows) == 0 {
+		return ""
+	}
+
+	var content strings.Builder
+
+	// Title
+	if data.Title != "" {
+		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
+		content.WriteString(titleStyle.Render(data.Title))
+		content.WriteString("\n\n")
+	}
+
+	// Calculate column widths
+	colWidths := make([]int, len(data.Headers))
+	for i, header := range data.Headers {
+		colWidths[i] = len(header)
+	}
+
+	for _, row := range data.Rows {
+		for i, cell := range row {
+			if i < len(colWidths) && len(cell) > colWidths[i] {
+				colWidths[i] = len(cell)
+			}
+		}
+	}
+
+	// Add padding between columns
+	for i := range colWidths {
+		colWidths[i] += 4 // More spacing for better readability
+	}
+
+	// Render headers
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("33"))
+	for i, header := range data.Headers {
+		content.WriteString(headerStyle.Render(fmt.Sprintf("%-*s", colWidths[i], header)))
+	}
+	content.WriteString("\n")
+
+	// Simple underline for headers (just spaces for clean look)
+	content.WriteString("\n")
+
+	// Render rows
+	for _, row := range data.Rows {
+		for i, cell := range row {
+			if i < len(colWidths) {
+				content.WriteString(fmt.Sprintf("%-*s", colWidths[i], cell))
+			}
+		}
+		content.WriteString("\n")
+	}
+
+	return content.String()
+}
+
+// FormatPropertiesAsTable formats resource properties as a table
+func FormatPropertiesAsTable(properties map[string]interface{}) string {
+	if len(properties) == 0 {
+		return ""
+	}
+
+	tableData := TableData{
+		Headers: []string{"Property", "Value"},
+		Title:   "⚙️  Configuration Properties",
+	}
+
+	// Convert properties to table rows
+	for key, value := range properties {
+		formattedKey := formatPropertyName(key)
+		formattedValue := formatValue(value)
+
+		// Truncate long values for table display
+		if len(formattedValue) > 50 {
+			formattedValue = formattedValue[:47] + "..."
+		}
+
+		tableData.Rows = append(tableData.Rows, []string{formattedKey, formattedValue})
+	}
+
+	// Sort rows by property name for consistency
+	sort.Slice(tableData.Rows, func(i, j int) bool {
+		return tableData.Rows[i][0] < tableData.Rows[j][0]
+	})
+
+	return RenderTable(tableData)
+}
+
+// RenderSimpleList renders data as a clean property list (alternative to table)
+func RenderSimpleList(data TableData) string {
+	if len(data.Rows) == 0 {
+		return ""
+	}
+
+	var content strings.Builder
+
+	// Title
+	if data.Title != "" {
+		titleStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39"))
+		content.WriteString(titleStyle.Render(data.Title))
+		content.WriteString("\n\n")
+	}
+
+	// Find the longest property name for alignment
+	maxKeyLength := 0
+	for _, row := range data.Rows {
+		if len(row) > 0 && len(row[0]) > maxKeyLength {
+			maxKeyLength = len(row[0])
+		}
+	}
+
+	// Render rows as property: value pairs
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("14")).Bold(true)
+	valueStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
+
+	for _, row := range data.Rows {
+		if len(row) >= 2 {
+			key := fmt.Sprintf("%-*s", maxKeyLength, row[0])
+			content.WriteString(fmt.Sprintf("%s: %s\n",
+				keyStyle.Render(key),
+				valueStyle.Render(row[1])))
+		}
+	}
+
+	return content.String()
+}
+
+// FormatPropertiesAsSimpleList formats resource properties as a simple list
+func FormatPropertiesAsSimpleList(properties map[string]interface{}) string {
+	if len(properties) == 0 {
+		return ""
+	}
+
+	tableData := TableData{
+		Title: "⚙️  Configuration Properties",
+	}
+
+	// Convert properties to rows
+	for key, value := range properties {
+		formattedKey := formatPropertyName(key)
+		formattedValue := formatValue(value)
+
+		// Truncate long values for display
+		if len(formattedValue) > 60 {
+			formattedValue = formattedValue[:57] + "..."
+		}
+
+		tableData.Rows = append(tableData.Rows, []string{formattedKey, formattedValue})
+	}
+
+	// Sort rows by property name for consistency
+	sort.Slice(tableData.Rows, func(i, j int) bool {
+		return tableData.Rows[i][0] < tableData.Rows[j][0]
+	})
+
+	return RenderSimpleList(tableData)
 }

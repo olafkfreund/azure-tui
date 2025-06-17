@@ -268,14 +268,42 @@ func executeResourceActionCmd(action string, resource AzureResource) tea.Cmd {
 		case "start":
 			if resource.Type == "Microsoft.Compute/virtualMachines" {
 				result = resourceactions.StartVM(resource.Name, resource.ResourceGroup)
+			} else if resource.Type == "Microsoft.ContainerService/managedClusters" {
+				result = resourceactions.StartAKSCluster(resource.Name, resource.ResourceGroup)
 			}
 		case "stop":
 			if resource.Type == "Microsoft.Compute/virtualMachines" {
 				result = resourceactions.StopVM(resource.Name, resource.ResourceGroup)
+			} else if resource.Type == "Microsoft.ContainerService/managedClusters" {
+				result = resourceactions.StopAKSCluster(resource.Name, resource.ResourceGroup)
 			}
 		case "restart":
 			if resource.Type == "Microsoft.Compute/virtualMachines" {
 				result = resourceactions.RestartVM(resource.Name, resource.ResourceGroup)
+			}
+		case "ssh":
+			if resource.Type == "Microsoft.Compute/virtualMachines" {
+				result = resourceactions.ExecuteVMSSH(resource.Name, resource.ResourceGroup, "azureuser")
+			}
+		case "bastion":
+			if resource.Type == "Microsoft.Compute/virtualMachines" {
+				result = resourceactions.ConnectVMBastion(resource.Name, resource.ResourceGroup)
+			}
+		case "pods":
+			if resource.Type == "Microsoft.ContainerService/managedClusters" {
+				result = resourceactions.ListAKSPods(resource.Name, resource.ResourceGroup)
+			}
+		case "deployments":
+			if resource.Type == "Microsoft.ContainerService/managedClusters" {
+				result = resourceactions.ListAKSDeployments(resource.Name, resource.ResourceGroup)
+			}
+		case "nodes":
+			if resource.Type == "Microsoft.ContainerService/managedClusters" {
+				result = resourceactions.GetAKSNodes(resource.Name, resource.ResourceGroup)
+			}
+		case "services":
+			if resource.Type == "Microsoft.ContainerService/managedClusters" {
+				result = resourceactions.ListAKSServices(resource.Name, resource.ResourceGroup)
 			}
 		default:
 			result = resourceactions.ActionResult{Success: false, Message: "Unsupported action"}
@@ -474,6 +502,36 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				return m, loadDataCmd()
 			}
+		case "c":
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.Compute/virtualMachines" {
+				m.actionInProgress = true
+				return m, executeResourceActionCmd("ssh", *m.selectedResource)
+			}
+		case "b":
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.Compute/virtualMachines" {
+				m.actionInProgress = true
+				return m, executeResourceActionCmd("bastion", *m.selectedResource)
+			}
+		case "p":
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.ContainerService/managedClusters" {
+				m.actionInProgress = true
+				return m, executeResourceActionCmd("pods", *m.selectedResource)
+			}
+		case "D":
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.ContainerService/managedClusters" {
+				m.actionInProgress = true
+				return m, executeResourceActionCmd("deployments", *m.selectedResource)
+			}
+		case "n":
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.ContainerService/managedClusters" {
+				m.actionInProgress = true
+				return m, executeResourceActionCmd("nodes", *m.selectedResource)
+			}
+		case "v":
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.ContainerService/managedClusters" {
+				m.actionInProgress = true
+				return m, executeResourceActionCmd("services", *m.selectedResource)
+			}
 		case "R":
 			return m, loadDataCmd()
 		}
@@ -552,15 +610,9 @@ func (m model) View() string {
 	if m.selectedPanel == 0 {
 		leftPanelStyle = leftPanelStyle.
 			Foreground(fgLight).
-			Bold(true).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorBlue)
+			Bold(true)
 		// Add enhanced active panel indicator
 		treeContent = "🔍 " + strings.Replace(treeContent, "\n", "\n   ", -1)
-	} else {
-		leftPanelStyle = leftPanelStyle.
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorGray)
 	}
 
 	leftPanel := leftPanelStyle.Render(treeContent)
@@ -585,15 +637,9 @@ func (m model) View() string {
 	if m.selectedPanel == 1 {
 		rightPanelStyle = rightPanelStyle.
 			Foreground(fgLight).
-			Bold(true).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorGreen)
+			Bold(true)
 		// Add enhanced active panel marker
 		rightContent = "📊 " + strings.Replace(rightContent, "\n", "\n   ", -1)
-	} else {
-		rightPanelStyle = rightPanelStyle.
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorGray)
 	}
 
 	rightPanel := rightPanelStyle.Render(rightContent)
@@ -772,6 +818,42 @@ func (m model) renderEnhancedResourceDetails(width, height int) string {
 		content.WriteString(fmt.Sprintf("%s Start VM\n", actionStyle.Render("[s]")))
 		content.WriteString(fmt.Sprintf("%s Stop VM\n", actionStyle.Render("[S]")))
 		content.WriteString(fmt.Sprintf("%s Restart VM\n", actionStyle.Render("[r]")))
+		content.WriteString(fmt.Sprintf("%s SSH Connect\n", actionStyle.Render("[c]")))
+		content.WriteString(fmt.Sprintf("%s Bastion Connect\n", actionStyle.Render("[b]")))
+
+		if m.actionInProgress {
+			progressStyle := lipgloss.NewStyle().Foreground(colorYellow)
+			content.WriteString("\n")
+			content.WriteString(progressStyle.Render("⏳ Action in progress..."))
+			content.WriteString("\n")
+		}
+
+		if m.lastActionResult != nil {
+			resultStyle := lipgloss.NewStyle().Foreground(colorRed)
+			icon := "❌"
+			if m.lastActionResult.Success {
+				resultStyle = lipgloss.NewStyle().Foreground(colorGreen)
+				icon = "✅"
+			}
+			content.WriteString("\n")
+			content.WriteString(fmt.Sprintf("%s %s", icon, resultStyle.Render(m.lastActionResult.Message)))
+			content.WriteString("\n")
+		}
+	}
+
+	// Actions Section for AKS Clusters
+	if resource.Type == "Microsoft.ContainerService/managedClusters" {
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("🚢 AKS Management Actions"))
+		content.WriteString("\n")
+
+		actionStyle := lipgloss.NewStyle().Foreground(colorBlue)
+		content.WriteString(fmt.Sprintf("%s Start Cluster\n", actionStyle.Render("[s]")))
+		content.WriteString(fmt.Sprintf("%s Stop Cluster\n", actionStyle.Render("[S]")))
+		content.WriteString(fmt.Sprintf("%s List Pods\n", actionStyle.Render("[p]")))
+		content.WriteString(fmt.Sprintf("%s List Deployments\n", actionStyle.Render("[D]")))
+		content.WriteString(fmt.Sprintf("%s List Nodes\n", actionStyle.Render("[n]")))
+		content.WriteString(fmt.Sprintf("%s List Services\n", actionStyle.Render("[v]")))
 
 		if m.actionInProgress {
 			progressStyle := lipgloss.NewStyle().Foreground(colorYellow)
@@ -796,41 +878,16 @@ func (m model) renderEnhancedResourceDetails(width, height int) string {
 	// Properties Section
 	if m.resourceDetails != nil && len(m.resourceDetails.Properties) > 0 {
 		content.WriteString("\n")
-		content.WriteString(sectionStyle.Render("⚙️  Configuration"))
+
+		// Use clean list formatting for better property display
+		listData := tui.FormatPropertiesAsSimpleList(m.resourceDetails.Properties)
+		content.WriteString(listData)
+
+		// Add expansion hints for complex properties
 		content.WriteString("\n")
-
-		// Show only important properties to avoid clutter
-		importantProps := getImportantProperties(resource.Type)
-		for _, prop := range importantProps {
-			if value, exists := m.resourceDetails.Properties[prop]; exists {
-				propStyle := lipgloss.NewStyle().Foreground(colorAqua)
-				formattedName := formatPropertyName(prop)
-
-				// Check if this is a complex property that needs special formatting
-				if prop == "agentPoolProfiles" || prop == "subnets" || prop == "primaryEndpoints" {
-					isExpanded := m.expandedProperties[prop]
-					if isExpanded {
-						content.WriteString(fmt.Sprintf("%s: %s\n",
-							propStyle.Render(formattedName+" (Expanded)"),
-							formatComplexProperty(prop, value, 1)))
-					} else {
-						// Show condensed view with expansion hint
-						summary := getPropertySummary(prop, value)
-						expandHint := lipgloss.NewStyle().Foreground(colorGray).Render(" [Press 'e' to expand]")
-						content.WriteString(fmt.Sprintf("%s: %s%s\n",
-							propStyle.Render(formattedName),
-							valueStyle.Render(summary),
-							expandHint))
-					}
-				} else {
-					// Simple property formatting
-					formattedValue := formatValue(value)
-					content.WriteString(fmt.Sprintf("%s: %s\n",
-						propStyle.Render(formattedName),
-						valueStyle.Render(formattedValue)))
-				}
-			}
-		}
+		helpStyle := lipgloss.NewStyle().Faint(true).Foreground(colorGray)
+		content.WriteString(helpStyle.Render("💡 Tip: Press 'e' to expand complex properties like Agent Pools"))
+		content.WriteString("\n")
 	}
 
 	// Footer with help text

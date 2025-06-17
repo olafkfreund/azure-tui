@@ -126,6 +126,65 @@ func ConnectVMSSH(vmName, resourceGroup, username string) ActionResult {
 	}
 }
 
+// ExecuteVMSSH executes SSH connection to a VM
+func ExecuteVMSSH(vmName, resourceGroup, username string) ActionResult {
+	// First get the VM's public IP
+	cmd := exec.Command("az", "vm", "list-ip-addresses",
+		"--name", vmName,
+		"--resource-group", resourceGroup,
+		"--query", "[0].virtualMachine.network.publicIpAddresses[0].ipAddress",
+		"--output", "tsv")
+
+	output, err := cmd.Output()
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: "Failed to get VM public IP address",
+			Output:  string(output),
+		}
+	}
+
+	publicIP := strings.TrimSpace(string(output))
+	if publicIP == "" {
+		return ActionResult{
+			Success: false,
+			Message: "VM does not have a public IP address. Consider using Azure Bastion instead.",
+			Output:  "",
+		}
+	}
+
+	// Check if SSH key authentication is available
+	sshKeyCmd := exec.Command("az", "vm", "show",
+		"--name", vmName,
+		"--resource-group", resourceGroup,
+		"--query", "osProfile.linuxConfiguration.disablePasswordAuthentication",
+		"--output", "tsv")
+
+	keyAuthOutput, err := sshKeyCmd.Output()
+	keyAuthEnabled := strings.TrimSpace(string(keyAuthOutput)) == "true"
+
+	// Prepare SSH command with appropriate options
+	var sshCmd *exec.Cmd
+	if keyAuthEnabled {
+		// Use SSH key authentication
+		sshCmd = exec.Command("ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", fmt.Sprintf("%s@%s", username, publicIP))
+	} else {
+		// Use password authentication
+		sshCmd = exec.Command("ssh", "-o", "StrictHostKeyChecking=no", "-o", "UserKnownHostsFile=/dev/null", "-o", "PasswordAuthentication=yes", fmt.Sprintf("%s@%s", username, publicIP))
+	}
+
+	// Return the command for execution in a terminal
+	cmdStr := strings.Join(sshCmd.Args, " ")
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("SSH connection ready for VM '%s' at %s", vmName, publicIP),
+		Output: fmt.Sprintf("Execute: %s\n\nConnection Details:\n- VM: %s\n- IP: %s\n- User: %s\n- Auth: %s",
+			cmdStr, vmName, publicIP, username,
+			map[bool]string{true: "SSH Key", false: "Password"}[keyAuthEnabled]),
+	}
+}
+
 // ConnectVMBastion connects to a VM via Azure Bastion
 func ConnectVMBastion(vmName, resourceGroup string) ActionResult {
 	// Check if VM has Bastion available
@@ -276,6 +335,166 @@ func ScaleAKSCluster(clusterName, resourceGroup string, nodeCount int) ActionRes
 	}
 }
 
+// AKS kubectl management functions
+
+// ConnectAKSCluster gets credentials and connects to AKS cluster
+func ConnectAKSCluster(clusterName, resourceGroup string) ActionResult {
+	cmd := exec.Command("az", "aks", "get-credentials",
+		"--name", clusterName,
+		"--resource-group", resourceGroup,
+		"--overwrite-existing")
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to get AKS credentials: %v", err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("Successfully connected to AKS cluster '%s'", clusterName),
+		Output:  string(output),
+	}
+}
+
+// ListAKSPods lists all pods in the AKS cluster
+func ListAKSPods(clusterName, resourceGroup string) ActionResult {
+	// First get credentials
+	connectResult := ConnectAKSCluster(clusterName, resourceGroup)
+	if !connectResult.Success {
+		return connectResult
+	}
+
+	cmd := exec.Command("kubectl", "get", "pods", "--all-namespaces", "-o", "wide")
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to list pods: %v", err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("Pods in cluster '%s'", clusterName),
+		Output:  string(output),
+	}
+}
+
+// ListAKSDeployments lists all deployments in the AKS cluster
+func ListAKSDeployments(clusterName, resourceGroup string) ActionResult {
+	// First get credentials
+	connectResult := ConnectAKSCluster(clusterName, resourceGroup)
+	if !connectResult.Success {
+		return connectResult
+	}
+
+	cmd := exec.Command("kubectl", "get", "deployments", "--all-namespaces", "-o", "wide")
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to list deployments: %v", err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("Deployments in cluster '%s'", clusterName),
+		Output:  string(output),
+	}
+}
+
+// ListAKSServices lists all services in the AKS cluster
+func ListAKSServices(clusterName, resourceGroup string) ActionResult {
+	// First get credentials
+	connectResult := ConnectAKSCluster(clusterName, resourceGroup)
+	if !connectResult.Success {
+		return connectResult
+	}
+
+	cmd := exec.Command("kubectl", "get", "services", "--all-namespaces", "-o", "wide")
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to list services: %v", err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("Services in cluster '%s'", clusterName),
+		Output:  string(output),
+	}
+}
+
+// ShowAKSLogs shows logs for a specific pod
+func ShowAKSLogs(clusterName, resourceGroup, podName, namespace string) ActionResult {
+	// First get credentials
+	connectResult := ConnectAKSCluster(clusterName, resourceGroup)
+	if !connectResult.Success {
+		return connectResult
+	}
+
+	var cmd *exec.Cmd
+	if namespace != "" {
+		cmd = exec.Command("kubectl", "logs", podName, "-n", namespace, "--tail=100")
+	} else {
+		cmd = exec.Command("kubectl", "logs", podName, "--tail=100")
+	}
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to get logs for pod '%s': %v", podName, err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("Logs for pod '%s'", podName),
+		Output:  string(output),
+	}
+}
+
+// GetAKSNodes lists all nodes in the AKS cluster
+func GetAKSNodes(clusterName, resourceGroup string) ActionResult {
+	// First get credentials
+	connectResult := ConnectAKSCluster(clusterName, resourceGroup)
+	if !connectResult.Success {
+		return connectResult
+	}
+
+	cmd := exec.Command("kubectl", "get", "nodes", "-o", "wide")
+	output, err := cmd.CombinedOutput()
+
+	if err != nil {
+		return ActionResult{
+			Success: false,
+			Message: fmt.Sprintf("Failed to list nodes: %v", err),
+			Output:  string(output),
+		}
+	}
+
+	return ActionResult{
+		Success: true,
+		Message: fmt.Sprintf("Nodes in cluster '%s'", clusterName),
+		Output:  string(output),
+	}
+}
+
 // GetResourceActions returns available actions for a resource type
 func GetResourceActions(resourceType string) []string {
 	var actions []string
@@ -286,7 +505,7 @@ func GetResourceActions(resourceType string) []string {
 	case strings.Contains(resourceType, "Microsoft.Web/sites"):
 		actions = []string{"start", "stop", "restart", "browse", "logs"}
 	case strings.Contains(resourceType, "Microsoft.ContainerService/managedClusters"):
-		actions = []string{"start", "stop", "scale", "connect", "pods", "deployments"}
+		actions = []string{"start", "stop", "scale", "connect", "pods", "deployments", "services", "logs", "nodes"}
 	case strings.Contains(resourceType, "Microsoft.Sql/servers"):
 		actions = []string{"backup", "scale", "connect", "security"}
 	case strings.Contains(resourceType, "Microsoft.Storage/storageAccounts"):
@@ -329,7 +548,7 @@ func ExecuteResourceAction(action, resourceType, resourceName, resourceGroup str
 			if u, ok := params["username"].(string); ok {
 				username = u
 			}
-			return ConnectVMSSH(resourceName, resourceGroup, username)
+			return ExecuteVMSSH(resourceName, resourceGroup, username)
 		}
 	case "bastion":
 		if strings.Contains(resourceType, "Microsoft.Compute/virtualMachines") {
@@ -342,6 +561,38 @@ func ExecuteResourceAction(action, resourceType, resourceName, resourceGroup str
 				nodeCount = n
 			}
 			return ScaleAKSCluster(resourceName, resourceGroup, nodeCount)
+		}
+	case "connect":
+		if strings.Contains(resourceType, "Microsoft.ContainerService/managedClusters") {
+			return ConnectAKSCluster(resourceName, resourceGroup)
+		}
+	case "pods":
+		if strings.Contains(resourceType, "Microsoft.ContainerService/managedClusters") {
+			return ListAKSPods(resourceName, resourceGroup)
+		}
+	case "deployments":
+		if strings.Contains(resourceType, "Microsoft.ContainerService/managedClusters") {
+			return ListAKSDeployments(resourceName, resourceGroup)
+		}
+	case "services":
+		if strings.Contains(resourceType, "Microsoft.ContainerService/managedClusters") {
+			return ListAKSServices(resourceName, resourceGroup)
+		}
+	case "logs":
+		if strings.Contains(resourceType, "Microsoft.ContainerService/managedClusters") {
+			podName := ""
+			namespace := ""
+			if p, ok := params["podName"].(string); ok {
+				podName = p
+			}
+			if n, ok := params["namespace"].(string); ok {
+				namespace = n
+			}
+			return ShowAKSLogs(resourceName, resourceGroup, podName, namespace)
+		}
+	case "nodes":
+		if strings.Contains(resourceType, "Microsoft.ContainerService/managedClusters") {
+			return GetAKSNodes(resourceName, resourceGroup)
 		}
 	}
 
