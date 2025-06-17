@@ -120,7 +120,7 @@ func main() {
 			return
 		}
 	}
-	p := tea.NewProgram(initialModel())
+	p := tea.NewProgram(initialModel(), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if err := p.Start(); err != nil {
 		os.Exit(1)
 	}
@@ -148,6 +148,22 @@ func initialModel() tea.Model {
 		aiProvider:            aiProvider,
 		currentResourceConfig: make(map[string]string),
 		resourceMetrics:       make(map[string]interface{}),
+		termWidth:             80, // Default fallback dimensions
+		termHeight:            24, // Default fallback dimensions
+		maxVisibleGroups:      10, // Default scrolling limits
+		maxVisibleResources:   15, // Default scrolling limits
+		// Initialize with empty data - will be loaded from Azure
+		subscriptions: []Subscription{},
+		tenants:       []Tenant{},
+		currentSub:    0,
+		currentTenant: 0,
+		// Initialize tree view and status bar
+		treeView:         tui.NewTreeView(),
+		statusBar:        tui.CreatePowerlineStatusBar(80),
+		leftPanelWidth:   40,
+		showTreeView:     true,
+		contentTabs:      []tui.Tab{},
+		activeContentTab: 0,
 	}
 }
 
@@ -289,16 +305,44 @@ type model struct {
 	// Terminal dimensions
 	termWidth  int
 	termHeight int
+
+	// Tree view and interface components
+	treeView       *tui.TreeView
+	statusBar      *tui.StatusBar
+	leftPanelWidth int
+	showTreeView   bool
+
+	// Content tabs (right side)
+	contentTabs      []tui.Tab
+	activeContentTab int
+
+	// Scrolling and navigation
+	groupScrollOffset    int
+	resourceScrollOffset int
+	maxVisibleGroups     int
+	maxVisibleResources  int
 }
 
 func (m *model) Init() tea.Cmd {
-	return func() tea.Msg {
-		subs, tenants, err := fetchAzureSubsAndTenants()
-		if err != nil {
-			return loadErrMsg(err.Error())
-		}
-		return loadedMsg{subs, tenants}
-	}
+	return tea.Batch(
+		func() tea.Msg {
+			subs, tenants, err := fetchAzureSubsAndTenants()
+			if err != nil {
+				return loadErrMsg(err.Error())
+			}
+			return loadedMsg{subs, tenants}
+		},
+		// Load real Azure resources immediately
+		func() tea.Msg {
+			// Try to load real Azure resource groups first
+			groups, err := fetchResourceGroups("")
+			if err != nil {
+				// Only fallback to demo if Azure is completely unavailable
+				return loadErrMsg("Failed to load Azure resources: " + err.Error())
+			}
+			return resourcesMsg(groups)
+		},
+	)
 }
 
 type loadedMsg struct {
@@ -314,6 +358,24 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.termWidth = msg.Width
 		m.termHeight = msg.Height
+		// Recalculate scroll limits based on new terminal size
+		m.maxVisibleGroups = (m.termHeight - 12) / 2 // Account for borders and padding
+		m.maxVisibleResources = (m.termHeight - 12) / 2
+		// Ensure minimum values
+		if m.maxVisibleGroups < 5 {
+			m.maxVisibleGroups = 5
+		}
+		if m.maxVisibleResources < 5 {
+			m.maxVisibleResources = 5
+		}
+		// Update status bar width
+		if m.statusBar != nil {
+			m.statusBar.Width = msg.Width
+		}
+		// Update tree view size
+		if m.treeView != nil {
+			m.treeView.MaxVisible = (msg.Height - 8) // Account for borders and status bar
+		}
 		return m, nil
 	case loadedMsg:
 		m.subscriptions = msg.subs
@@ -325,7 +387,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.subscriptions) > 0 {
 			return m, loadResourcesCmd(m.subscriptions[m.currentSub].ID)
 		}
-		return m, nil
+		// Fallback: load demo resources directly
+		return m, loadResourcesCmd("demo-sub")
 	case resourcesMsg:
 		m.resourceGroups = msg
 		m.isLoading = false
@@ -337,6 +400,24 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			subID := m.subscriptions[m.currentSub].ID
 			m.resourceGroupsCache[subID] = msg
 		}
+
+		// Populate tree view with resource groups
+		m.treeView = tui.NewTreeView()
+		for _, rg := range m.resourceGroups {
+			m.treeView.AddResourceGroup(rg.Name, rg.Location)
+		}
+
+		// Set initial selection in tree view
+		if len(m.resourceGroups) > 0 && len(m.treeView.Root.Children) > 0 {
+			m.treeView.Root.Children[0].Selected = true
+		}
+
+		// Auto-select first resource group and load its resources for better UX
+		if len(m.resourceGroups) > 0 && m.selectedGroup == "" {
+			m.selectedGroup = m.resourceGroups[0].Name
+			m.resourceGroupIdx = 0
+			return m, loadResourcesInGroupCmd(m.selectedGroup)
+		}
 		return m, nil
 	case resourceLoadErrMsg:
 		m.resourceLoadErr = string(msg)
@@ -346,6 +427,19 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.groupName == m.selectedGroup {
 			m.resourcesInGroup = msg.resources
 			m.resourcesInGroupErr = ""
+
+			// Add resources to the corresponding resource group in tree view
+			for _, child := range m.treeView.Root.Children {
+				if child.Name == msg.groupName {
+					// Clear existing resources in this group
+					child.Children = []*tui.TreeNode{}
+					// Add all resources to this group
+					for _, resource := range msg.resources {
+						m.treeView.AddResource(child, resource.Name, resource.Type, resource)
+					}
+					break
+				}
+			}
 		}
 		return m, nil
 	case resourcesInGroupErrMsg:
@@ -395,6 +489,23 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loadErr = string(msg)
 		m.loading = false
 		return m, nil
+	case tea.MouseMsg:
+		// Handle mouse events for better interactivity
+		if msg.Type == tea.MouseWheelUp {
+			// Scroll up in resource groups panel
+			if m.groupScrollOffset > 0 {
+				m.groupScrollOffset--
+			}
+		} else if msg.Type == tea.MouseWheelDown {
+			// Scroll down in resource groups panel
+			if len(m.resourceGroups) > m.maxVisibleGroups && m.groupScrollOffset < len(m.resourceGroups)-m.maxVisibleGroups {
+				m.groupScrollOffset++
+			}
+		} else if msg.Type == tea.MouseLeft {
+			// Handle mouse clicks for selection (simplified)
+			// Could be enhanced to detect which panel was clicked
+		}
+		return m, nil
 	case tea.KeyMsg:
 		if m.loading || m.isLoading {
 			return m, nil
@@ -421,7 +532,39 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "enter":
-			if m.activeTabIdx == 0 && len(m.resourcesInGroup) > 0 && m.resourceIdx < len(m.resourcesInGroup) {
+			if m.showTreeView && len(m.resourcesInGroup) > 0 && m.resourceIdx < len(m.resourcesInGroup) {
+				// Tree view mode: open resource in right-side content tab
+				res := m.resourcesInGroup[m.resourceIdx]
+
+				// Check if content tab for this resource already exists
+				found := -1
+				for i, tab := range m.contentTabs {
+					if tab.Meta["id"] == res.ID {
+						found = i
+						break
+					}
+				}
+
+				if found == -1 {
+					// Create new content tab
+					content := fmt.Sprintf("Resource Details\n%s\n\nName: %s\nType: %s\nLocation: %s\nResource Group: %s\nID: %s\n\nActions:\n• Press 'a' for AI analysis\n• Press 'M' for metrics\n• Press 'E' to edit\n• Press 'T' for Terraform\n• Press 'B' for Bicep",
+						strings.Repeat("=", 50), res.Name, res.Type, res.Location, m.selectedGroup, res.ID)
+
+					tab := tui.Tab{
+						Title:    res.Name,
+						Content:  content,
+						Type:     res.Type,
+						Meta:     map[string]string{"id": res.ID, "type": res.Type, "resourceGroup": m.selectedGroup},
+						Closable: true,
+					}
+					m.contentTabs = append(m.contentTabs, tab)
+					m.activeContentTab = len(m.contentTabs) - 1 // switch to new tab
+				} else {
+					m.activeContentTab = found // switch to existing tab
+				}
+				return m, nil
+			} else if m.activeTabIdx == 0 && len(m.resourcesInGroup) > 0 && m.resourceIdx < len(m.resourcesInGroup) {
+				// Legacy mode: open resource in traditional tab
 				res := m.resourcesInGroup[m.resourceIdx]
 				// Check if tab for this resource already exists
 				found := -1
@@ -533,28 +676,72 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
-		case "down":
+		case "down", "j":
 			if len(m.resourceGroups) > 0 {
 				m.resourceGroupIdx = (m.resourceGroupIdx + 1) % len(m.resourceGroups)
+				// Auto-scroll if needed
+				if m.resourceGroupIdx >= m.groupScrollOffset+m.maxVisibleGroups {
+					m.groupScrollOffset = m.resourceGroupIdx - m.maxVisibleGroups + 1
+				}
 				m.selectedGroup = m.resourceGroups[m.resourceGroupIdx].Name
+
+				// Update tree view selection if in tree mode
+				if m.showTreeView && m.treeView != nil {
+					for i, child := range m.treeView.Root.Children {
+						child.Selected = (i == m.resourceGroupIdx)
+					}
+				}
+
 				return m, loadResourcesInGroupCmd(m.selectedGroup)
 			}
-		case "up":
+		case "up", "k":
 			if len(m.resourceGroups) > 0 {
 				m.resourceGroupIdx = (m.resourceGroupIdx - 1 + len(m.resourceGroups)) % len(m.resourceGroups)
+				// Auto-scroll if needed
+				if m.resourceGroupIdx < m.groupScrollOffset {
+					m.groupScrollOffset = m.resourceGroupIdx
+				}
 				m.selectedGroup = m.resourceGroups[m.resourceGroupIdx].Name
+
+				// Update tree view selection if in tree mode
+				if m.showTreeView && m.treeView != nil {
+					for i, child := range m.treeView.Root.Children {
+						child.Selected = (i == m.resourceGroupIdx)
+					}
+				}
+
 				return m, loadResourcesInGroupCmd(m.selectedGroup)
 			}
 		case "right":
 			if len(m.resourcesInGroup) > 0 {
 				m.resourceIdx = (m.resourceIdx + 1) % len(m.resourcesInGroup)
+				// Auto-scroll if needed
+				if m.resourceIdx >= m.resourceScrollOffset+m.maxVisibleResources {
+					m.resourceScrollOffset = m.resourceIdx - m.maxVisibleResources + 1
+				}
 				m.selectedResource = m.resourcesInGroup[m.resourceIdx].Name
 			}
 		case "left":
 			if len(m.resourcesInGroup) > 0 {
 				m.resourceIdx = (m.resourceIdx - 1 + len(m.resourcesInGroup)) % len(m.resourcesInGroup)
+				// Auto-scroll if needed
+				if m.resourceIdx < m.resourceScrollOffset {
+					m.resourceScrollOffset = m.resourceIdx
+				}
 				m.selectedResource = m.resourcesInGroup[m.resourceIdx].Name
 			}
+		case " ", "space":
+			// Expand/collapse tree nodes (vim-like space functionality)
+			if m.showTreeView && len(m.resourceGroups) > 0 && m.resourceGroupIdx < len(m.resourceGroups) {
+				// Find the corresponding tree node and toggle expansion
+				for _, child := range m.treeView.Root.Children {
+					if child.Name == m.selectedGroup {
+						child.Expanded = !child.Expanded
+						break
+					}
+				}
+			}
+			return m, nil
 		case "d":
 			// Show details for selected resource
 			if m.selectedResource != "" && m.resourceIdx < len(m.resourcesInGroup) {
@@ -566,7 +753,7 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.selectedResource = resource.Name + "\n" + details
 				}
 			}
-		case "k":
+		case "ctrl+k":
 			// Load AKS clusters
 			m.aksLoading = true
 			return m, loadAKSClustersCmd()
@@ -708,9 +895,13 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			title := fmt.Sprintf("Tab %d", len(m.tabManager.Tabs)+1)
 			m.tabManager.AddTab(tui.Tab{Title: title, Content: "New tab opened.", Type: "blank", Closable: true})
 			return m, nil
-		case "F1":
+		case "?":
 			// Show shortcuts popup
 			m.showShortcutsPopup = true
+			return m, nil
+		case "F2":
+			// Toggle between tree view and traditional tab interface
+			m.showTreeView = !m.showTreeView
 			return m, nil
 		case "a":
 			// Show AI analysis for selected resource
@@ -857,24 +1048,163 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) View() string {
-	tabs := []tui.Tab{{Title: "Resource Browser", Closable: false, Type: "resourcegroup"}}
-	tabs = append(tabs, m.resourceTabs...)
-	tabBar := tui.RenderTabsWithActive(tabs, m.activeTabIdx)
-	var content string
-	if m.activeTabIdx == 0 {
-		// Main resource browser: left = groups, right = resources
-		leftPanel := renderLeftPanel(m)
-		rightPanel := renderRightPanel(m)
-		panels := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
-		content = lipgloss.JoinVertical(lipgloss.Left, panels)
-	} else {
-		// Resource tab: show details for that resource
-		resTab := m.resourceTabs[m.activeTabIdx-1]
-		// Optionally fetch and update details if needed
-		content = resTab.Content
+	// Handle loading state
+	if m.loading {
+		loadingText := "🔄 Loading Azure resources...\n\nConnecting to Azure CLI..."
+		if m.loadErr != "" {
+			loadingText = fmt.Sprintf("❌ Error loading Azure resources:\n\n%s\n\nPlease ensure you're logged in with 'az login'", m.loadErr)
+		}
+
+		content := lipgloss.NewStyle().
+			Width(m.termWidth-4).
+			Height(m.termHeight-4).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("63")).
+			Background(lipgloss.Color("236")).
+			Foreground(lipgloss.Color("252")).
+			Padding(2, 4).
+			Align(lipgloss.Center, lipgloss.Center).
+			Render(loadingText)
+
+		return renderMainBoxLipgloss(content, m.termWidth, m.termHeight)
 	}
 
-	baseView := renderMainBoxLipgloss(tabBar+"\n"+content, m.termWidth, m.termHeight)
+	// Handle error state when not loading
+	if m.loadErr != "" {
+		errorText := fmt.Sprintf("❌ Azure Connection Error\n\n%s\n\nTroubleshooting:\n• Run 'az login' to authenticate\n• Check your internet connection\n• Verify you have access to Azure subscriptions\n\nPress 'q' to quit", m.loadErr)
+
+		content := lipgloss.NewStyle().
+			Width(m.termWidth-4).
+			Height(m.termHeight-4).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("196")).
+			Background(lipgloss.Color("236")).
+			Foreground(lipgloss.Color("252")).
+			Padding(2, 4).
+			Align(lipgloss.Center, lipgloss.Center).
+			Render(errorText)
+
+		return renderMainBoxLipgloss(content, m.termWidth, m.termHeight)
+	}
+
+	// Update status bar with current subscription and tenant information
+	if m.statusBar != nil {
+		// Clear existing segments
+		m.statusBar.Segments = []tui.PowerlineSegment{}
+		m.statusBar.RightAlign = []tui.PowerlineSegment{}
+
+		// Always show Azure TUI branding
+		m.statusBar.AddSegment("🚀 Azure TUI", lipgloss.Color("39"), lipgloss.Color("15"))
+
+		// Add subscription info if available
+		if len(m.subscriptions) > 0 && m.currentSub < len(m.subscriptions) {
+			sub := m.subscriptions[m.currentSub]
+			m.statusBar.AddSegment("☁️ "+sub.Name, lipgloss.Color("33"), lipgloss.Color("15"))
+		} else {
+			m.statusBar.AddSegment("☁️ Loading...", lipgloss.Color("240"), lipgloss.Color("15"))
+		}
+
+		// Add tenant info
+		if len(m.tenants) > 0 && m.currentTenant < len(m.tenants) {
+			tenant := m.tenants[m.currentTenant]
+			m.statusBar.AddSegment("🏢 "+tenant.Name, lipgloss.Color("33"), lipgloss.Color("15"))
+		}
+
+		// Add resource group count
+		if len(m.resourceGroups) > 0 {
+			resourceText := fmt.Sprintf("📁 %d groups", len(m.resourceGroups))
+			m.statusBar.AddSegment(resourceText, lipgloss.Color("63"), lipgloss.Color("15"))
+		} else {
+			m.statusBar.AddSegment("📁 Loading groups...", lipgloss.Color("240"), lipgloss.Color("15"))
+		}
+
+		// Add right-aligned segments
+		m.statusBar.AddRightSegment("⌨️ Press ? for help", lipgloss.Color("240"), lipgloss.Color("252"))
+	}
+
+	// Create main layout with tree view on left and content tabs on right
+	var mainContent string
+
+	if m.showTreeView && m.treeView != nil {
+		// Tree view + content tabs layout (NeoVim-style)
+		leftPanelHeight := m.termHeight - 3 // Account for status bar
+		treeViewContent := m.treeView.RenderTreeView(m.leftPanelWidth, leftPanelHeight)
+
+		// Right panel for content tabs
+		rightPanelWidth := m.termWidth - m.leftPanelWidth - 2
+		if rightPanelWidth < 20 {
+			rightPanelWidth = 20
+		}
+
+		var rightContent string
+		if len(m.contentTabs) > 0 && m.activeContentTab < len(m.contentTabs) {
+			// Render active content tab
+			activeTab := m.contentTabs[m.activeContentTab]
+			rightContent = lipgloss.NewStyle().
+				Width(rightPanelWidth).
+				Height(leftPanelHeight).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("63")).
+				Background(lipgloss.Color("236")).
+				Foreground(lipgloss.Color("252")).
+				Padding(1, 2).
+				Render(activeTab.Content)
+		} else {
+			// Show welcome message in right panel
+			welcomeText := "Welcome to Azure TUI\n\n" +
+				"TREE VIEW INTERFACE\n\n" +
+				"Navigate with:\n" +
+				"• j/k or ↑↓ - Navigate tree\n" +
+				"• Space - Expand/collapse\n" +
+				"• Enter - Open resource\n" +
+				"• ? - Show all shortcuts\n\n" +
+				"STATUS: Tree view mode active"
+
+			rightContent = lipgloss.NewStyle().
+				Width(rightPanelWidth).
+				Height(leftPanelHeight).
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(lipgloss.Color("63")).
+				Background(lipgloss.Color("236")).
+				Foreground(lipgloss.Color("252")).
+				Padding(1, 2).
+				Render(welcomeText)
+		}
+
+		// Combine tree view and content panels horizontally
+		mainContent = lipgloss.JoinHorizontal(lipgloss.Top, treeViewContent, rightContent)
+	} else {
+		// Fallback to traditional tab layout for resource tabs
+		tabs := []tui.Tab{{Title: "Resource Browser", Closable: false, Type: "resourcegroup"}}
+		tabs = append(tabs, m.resourceTabs...)
+		tabBar := tui.RenderTabsWithActive(tabs, m.activeTabIdx)
+
+		var content string
+		if m.activeTabIdx == 0 {
+			// Main resource browser: left = groups, right = resources
+			leftPanel := renderLeftPanel(m)
+			rightPanel := renderRightPanel(m)
+			panels := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
+			content = lipgloss.JoinVertical(lipgloss.Left, panels)
+		} else {
+			// Resource tab: show details for that resource
+			resTab := m.resourceTabs[m.activeTabIdx-1]
+			content = resTab.Content
+		}
+
+		mainContent = tabBar + "\n" + content
+	}
+
+	// Render status bar
+	var statusBarContent string
+	if m.statusBar != nil {
+		statusBarContent = m.statusBar.RenderStatusBar()
+	}
+
+	// Combine main content with status bar (status bar at top)
+	fullView := lipgloss.JoinVertical(lipgloss.Left, statusBarContent, mainContent)
+
+	baseView := renderMainBoxLipgloss(fullView, m.termWidth, m.termHeight)
 
 	// Show dialogs and popups on top of the main view
 	if m.showAIPopup {
@@ -914,21 +1244,23 @@ func (m *model) View() string {
 
 	if m.showShortcutsPopup {
 		shortcuts := map[string]string{
-			"↑/↓":    "Navigate resource groups",
-			"←/→":    "Navigate resources",
-			"Enter":  "Open resource tab",
-			"Tab":    "Switch tabs",
-			"Ctrl+W": "Close tab",
-			"a":      "AI analysis",
-			"M":      "Metrics dashboard",
-			"E":      "Edit resource",
-			"Ctrl+D": "Delete resource",
-			"T":      "Generate Terraform",
-			"B":      "Generate Bicep",
-			"O":      "Cost optimization",
-			"F1":     "Show shortcuts",
-			"Esc":    "Close popups",
-			"q":      "Quit",
+			"j/k,↑/↓": "Navigate tree/resources",
+			"Space":   "Expand/collapse tree",
+			"Enter":   "Open resource tab",
+			"Tab":     "Switch tabs",
+			"Ctrl+W":  "Close tab",
+			"F2":      "Toggle tree/traditional",
+			"a":       "AI analysis",
+			"M":       "Metrics dashboard",
+			"E":       "Edit resource",
+			"Ctrl+D":  "Delete resource",
+			"T":       "Generate Terraform",
+			"B":       "Generate Bicep",
+			"O":       "Cost optimization",
+			"Ctrl+K":  "Load AKS clusters",
+			"?":       "Show shortcuts",
+			"Esc":     "Close popups",
+			"q":       "Quit",
 		}
 		shortcutsContent := tui.RenderShortcutsPopup(shortcuts)
 		return baseView + "\n\n" + shortcutsContent
@@ -940,8 +1272,6 @@ func (m *model) View() string {
 // --- Modern Panel Renderers ---
 var (
 	panelBorder      = lipgloss.RoundedBorder()
-	panelWidth       = 40
-	panelHeight      = 25
 	panelBg          = lipgloss.Color("236")
 	panelFg          = lipgloss.Color("252")
 	panelBorderColor = lipgloss.Color("63")
@@ -950,6 +1280,18 @@ var (
 )
 
 func renderLeftPanel(m *model) string {
+	// Calculate responsive panel dimensions
+	panelWidth := (m.termWidth - 8) / 2 // Split terminal width in half, minus padding
+	panelHeight := m.termHeight - 8     // Terminal height minus margins
+
+	// Ensure minimum sizes
+	if panelWidth < 30 {
+		panelWidth = 30
+	}
+	if panelHeight < 15 {
+		panelHeight = 15
+	}
+
 	style := lipgloss.NewStyle().
 		Width(panelWidth).
 		Height(panelHeight).
@@ -963,23 +1305,72 @@ func renderLeftPanel(m *model) string {
 	var lines []string
 	folderIcon := "🗂️"
 
-	if m.resourceLoadErr != "" {
+	if m.loading || m.isLoading {
+		lines = append(lines, "🔄 Loading Azure resources...")
+	} else if m.resourceLoadErr != "" {
 		lines = append(lines, "❌ "+m.resourceLoadErr)
+		lines = append(lines, "")
+		lines = append(lines, "📝 Running in demo mode")
+		lines = append(lines, "Press ? for help")
 	} else if len(m.resourceGroups) == 0 {
-		lines = append(lines, "No resource groups found.")
+		lines = append(lines, "🔍 No resource groups found.")
+		lines = append(lines, "")
+		lines = append(lines, "📝 Running in demo mode")
+		lines = append(lines, "This might indicate:")
+		lines = append(lines, "• Azure CLI not configured")
+		lines = append(lines, "• No subscriptions available")
+		lines = append(lines, "• Network connectivity issues")
+		lines = append(lines, "")
+		lines = append(lines, "Press ? for keyboard shortcuts")
 	} else {
 		lines = append(lines, lipgloss.NewStyle().Bold(true).Render("Resource Groups"))
+
+		// Show scroll indicator if needed
+		totalGroups := len(m.resourceGroups)
+		if totalGroups > m.maxVisibleGroups {
+			scrollInfo := fmt.Sprintf("(%d of %d groups - scroll with ↑↓)",
+				min(m.groupScrollOffset+m.maxVisibleGroups, totalGroups), totalGroups)
+			lines = append(lines, lipgloss.NewStyle().Faint(true).Render(scrollInfo))
+		} else {
+			lines = append(lines, lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("(%d groups)", totalGroups)))
+		}
 		lines = append(lines, "")
-		for i, rg := range m.resourceGroups {
+
+		// Calculate visible range
+		startIdx := m.groupScrollOffset
+		endIdx := min(startIdx+m.maxVisibleGroups, len(m.resourceGroups))
+
+		// Render visible resource groups with scrolling
+		for i := startIdx; i < endIdx; i++ {
+			rg := m.resourceGroups[i]
 			prefix := "  "
 			if i == m.resourceGroupIdx {
 				prefix = "→ "
 			}
-			line := fmt.Sprintf("%s%s %s", prefix, folderIcon, rg.Name)
+
+			// Truncate long names to fit panel
+			name := rg.Name
+			maxNameLength := panelWidth - 10 // Account for prefix, icon, padding
+			if len(name) > maxNameLength {
+				name = name[:maxNameLength-3] + "..."
+			}
+
+			line := fmt.Sprintf("%s%s %s", prefix, folderIcon, name)
 			if i == m.resourceGroupIdx {
 				line = lipgloss.NewStyle().Background(selectedBg).Foreground(selectedFg).Render(line)
 			}
 			lines = append(lines, line)
+		}
+
+		// Add scroll indicators at bottom if needed
+		if totalGroups > m.maxVisibleGroups {
+			if m.groupScrollOffset > 0 && endIdx < totalGroups {
+				lines = append(lines, lipgloss.NewStyle().Faint(true).Render("... ↑ more above, ↓ more below ..."))
+			} else if m.groupScrollOffset > 0 {
+				lines = append(lines, lipgloss.NewStyle().Faint(true).Render("... ↑ more above ..."))
+			} else if endIdx < totalGroups {
+				lines = append(lines, lipgloss.NewStyle().Faint(true).Render("... ↓ more below ..."))
+			}
 		}
 	}
 
@@ -988,6 +1379,18 @@ func renderLeftPanel(m *model) string {
 }
 
 func renderRightPanel(m *model) string {
+	// Calculate responsive panel dimensions
+	panelWidth := (m.termWidth - 8) / 2 // Split terminal width in half, minus padding
+	panelHeight := m.termHeight - 8     // Terminal height minus margins
+
+	// Ensure minimum sizes
+	if panelWidth < 30 {
+		panelWidth = 30
+	}
+	if panelHeight < 15 {
+		panelHeight = 15
+	}
+
 	style := lipgloss.NewStyle().
 		Width(panelWidth).
 		Height(panelHeight).
@@ -1087,10 +1490,19 @@ func renderMainBoxLipgloss(content string, termWidth, termHeight int) string {
 	return boxStyle.Render(content)
 }
 
-// centerBox centers the given string in a box of fixed width using lipgloss.
-func centerBox(content string) string {
-	width := 90
-	height := 36
+// centerBox centers the given string in a box using responsive dimensions.
+func centerBox(content string, termWidth, termHeight int) string {
+	width := termWidth - 4
+	height := termHeight - 4
+
+	// Ensure minimum size
+	if width < 40 {
+		width = 40
+	}
+	if height < 10 {
+		height = 10
+	}
+
 	style := lipgloss.NewStyle().Width(width).Height(height).Align(lipgloss.Center, lipgloss.Center)
 	return style.Render(content)
 }
@@ -1099,21 +1511,29 @@ func centerBox(content string) string {
 func fetchAzureSubsAndTenants() ([]Subscription, []Tenant, error) {
 	subs := []Subscription{}
 	tenants := []Tenant{}
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	// Try to get subscriptions from Azure CLI, but fallback to demo data if it fails or times out
+	// Get subscriptions from Azure CLI
 	subCmd := exec.CommandContext(ctx, "az", "account", "list", "--output", "json")
 	subOut, err := subCmd.Output()
-	if err == nil && ctx.Err() == nil {
-		_ = json.Unmarshal(subOut, &subs)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to get Azure subscriptions: %v. Make sure you're logged in with 'az login'", err)
 	}
-	if len(subs) == 0 {
-		subs = []Subscription{{ID: "demo-sub", Name: "Demo Subscription", TenantID: "demo-tenant", IsDefault: true}}
+	if ctx.Err() != nil {
+		return nil, nil, fmt.Errorf("timeout getting Azure subscriptions. Please check your connection")
 	}
 
-	// Try to get tenants from Azure CLI, but fallback to demo data if it fails or times out
-	ctx2, cancel2 := context.WithTimeout(context.Background(), 3*time.Second)
+	if err := json.Unmarshal(subOut, &subs); err != nil {
+		return nil, nil, fmt.Errorf("failed to parse subscription data: %v", err)
+	}
+
+	if len(subs) == 0 {
+		return nil, nil, fmt.Errorf("no Azure subscriptions found. Please check your access")
+	}
+
+	// Get tenants from Azure CLI
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel2()
 	tenantCmd := exec.CommandContext(ctx2, "az", "account", "tenant", "list", "--output", "json")
 	tenantOut, err := tenantCmd.Output()
@@ -1121,8 +1541,9 @@ func fetchAzureSubsAndTenants() ([]Subscription, []Tenant, error) {
 		_ = json.Unmarshal(tenantOut, &tenants)
 	}
 	if len(tenants) == 0 {
-		tenants = []Tenant{{ID: "demo-tenant", Name: "Demo Tenant"}}
+		tenants = []Tenant{{ID: "default-tenant", Name: "Default Tenant"}}
 	}
+
 	return subs, tenants, nil
 }
 
@@ -1137,20 +1558,38 @@ func loadResourcesCmd(subID string) tea.Cmd {
 	}
 }
 
-// fetchResourceGroups uses Azure Go SDK via azuresdk.AzureClient to get resource groups for the current subscription.
+// fetchResourceGroups uses Azure CLI directly to get resource groups for the current subscription.
 func fetchResourceGroups(subID string) ([]ResourceGroup, error) {
-	if azureClient == nil {
-		return getDemoResourceGroups(), nil
+	// Try Azure CLI first with timeout
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "az", "group", "list", "--output", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return nil, fmt.Errorf("Azure CLI timeout after 10 seconds. Check your internet connection")
+		}
+		return nil, fmt.Errorf("failed to get resource groups via Azure CLI: %v. Make sure you're logged in with 'az login'", err)
 	}
-	groups, err := azureClient.ListResourceGroups(subID)
-	if err != nil || len(groups) == 0 {
-		return getDemoResourceGroups(), nil
+
+	var azGroups []struct {
+		Name     string `json:"name"`
+		Location string `json:"location"`
 	}
+	if err := json.Unmarshal(output, &azGroups); err != nil {
+		return nil, fmt.Errorf("failed to parse resource group data: %v", err)
+	}
+
+	if len(azGroups) == 0 {
+		return nil, fmt.Errorf("no resource groups found in current subscription")
+	}
+
 	var result []ResourceGroup
-	for _, g := range groups {
+	for _, g := range azGroups {
 		result = append(result, ResourceGroup{
-			Name:     *g.Name,
-			Location: *g.Location,
+			Name:     g.Name,
+			Location: g.Location,
 		})
 	}
 	return result, nil
@@ -1223,16 +1662,17 @@ func loadResourcesInGroupCmd(groupName string) tea.Cmd {
 
 // fetchResourcesInGroup uses Azure CLI to get resources in a resource group.
 func fetchResourcesInGroup(groupName string) ([]AzureResource, error) {
-	// fallback demo resource if CLI fails
 	cmd := exec.Command("az", "resource", "list", "--resource-group", groupName, "--output", "json")
 	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get resources for group %s: %v", groupName, err)
+	}
+
 	var resources []AzureResource
-	if err == nil {
-		_ = json.Unmarshal(out, &resources)
+	if err := json.Unmarshal(out, &resources); err != nil {
+		return nil, fmt.Errorf("failed to parse resources for group %s: %v", groupName, err)
 	}
-	if len(resources) == 0 {
-		resources = getDemoResourcesForGroup(groupName)
-	}
+
 	return resources, nil
 }
 

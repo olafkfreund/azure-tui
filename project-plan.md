@@ -1,103 +1,173 @@
-# Project Plan: Azure TUI/CLI (aztui)
+# Project Plan: Azure TUI (aztui) 🎯
 
 ## Overview
 
-A modular Go TUI/CLI tool for managing Azure resources, supporting reading, listing, editing, and deploying Terraform/Bicep files and state, with AI-powered code generation, validation, and troubleshooting. The app uses standard az login/config for authentication, YAML config for naming and settings, and provides a modern, keyboard-driven TUI interface. All TUI functions are available via CLI, and AI always guides and confirms with the user.
+A comprehensive Go-based Terminal User Interface for Azure resource management featuring a **NeoVim-style interface**, AI-powered analysis, Infrastructure as Code generation, and professional resource management capabilities. The application provides both TUI and CLI interfaces with seamless Azure integration and intelligent automation.
 
 ---
 
-## Features
+## ✅ **COMPLETED FEATURES (June 2025)**
 
-- Modular Azure resource logic (internal/azure/*)
-- Two-panel TUI layout with popups for logs/alarms
-- IaC file scanning (Terraform/Bicep/tfstate) and navigation
-- CLI flags for resource creation (`--create`) and deployment (`--deploy`), config-driven naming
-- YAML config loader (`internal/config/config.go`), sample config at `~/.config/azure-tui/config.yaml`
-- OpenAI/Copilot API integration with model selection, agent/role/prompt flexibility, Copilot tokens
-- Multiple Copilot agents for Azure scenarios: IaC, troubleshooting, security, cost, documentation, CLI help
-- Helper for scenario-driven agent selection
-- All features documented for TUI and CLI usage
-- Fallback/demo data for offline use
-- **Multi-tab and window support in TUI**: Create new tabs/windows for resource management, connections (AKS, VM), monitoring, health checks, etc., similar to tmux/zellij. Tabs can be opened/closed dynamically, supporting nested/multiple interfaces.
-- **Status line**: Persistent status bar at the bottom showing environment and connection status.
-- **Popup for shortcuts**: Keyboard shortcut popup for TUI navigation and actions.
-- **Resource/connection/monitoring tabs**: Actions for AKS, VM, monitoring, and health checks now open new tabs in the TUI, allowing parallel management and nested interfaces.
+### 🎨 **NeoVim-Style Interface** 
+- ✅ **Tree View Navigation**: Hierarchical Azure resource display with expand/collapse
+- ✅ **Powerline Statusbar**: Modern status bar with subscription/tenant context
+- ✅ **Content Tab System**: Right-side tabbed interface for opened resources
+- ✅ **Vim Navigation**: `j/k` keys, space for expand/collapse, familiar shortcuts
+- ✅ **Mouse Support**: Wheel scrolling and click interactions
+- ✅ **Interface Toggle**: `F2` to switch between tree view and traditional modes
 
----
+### 🤖 **AI-Powered Features**
+- ✅ **Resource Analysis** (`a`): Comprehensive AI insights and recommendations
+- ✅ **Terraform Generation** (`T`): Complete .tf file creation with dependencies
+- ✅ **Bicep Generation** (`B`): Azure Resource Manager template generation
+- ✅ **Cost Optimization** (`O`): AI-driven cost savings analysis
+- ✅ **OpenAI Integration**: Configurable API endpoints with GPT-4 support
 
-## ✅ COMPLETED FEATURES (June 2025)
+### 📊 **Interactive Dashboards & Dialogs**
+- ✅ **Metrics Dashboard** (`M`): Real-time resource metrics with ASCII trends
+- ✅ **Resource Editor** (`E`): Safe configuration editing with validation
+- ✅ **Delete Confirmation** (`Ctrl+D`): Protected resource deletion with warnings
+- ✅ **Resource Actions Menu**: Context-aware action suggestions
+- ✅ **Keyboard Shortcuts** (`?`): Complete shortcut reference popup
 
-### Core TUI Enhancements
-- ✅ **Fixed Unicode/emoji alignment** using go-runewidth for all rendering
-- ✅ **Modern styling** with lipgloss throughout the interface
-- ✅ **Two-panel layout** (left: resource groups, right: resources)
-- ✅ **Tabbed interface** with Azure service-specific icons
-- ✅ **Resource navigation** with up/down for groups, left/right for resources
-- ✅ **Tab management** with open/close/switch functionality
+### 🔧 **Technical Excellence**
+- ✅ **Modern Styling**: Lipgloss-based consistent UI throughout
+- ✅ **Unicode Alignment**: Proper emoji and icon rendering with go-runewidth
+- ✅ **Responsive Design**: Dynamic panel sizing and terminal adaptation
+- ✅ **Error Handling**: Graceful fallbacks to demo data
+- ✅ **Azure Integration**: Dual CLI + SDK support for maximum compatibility
 
-### AI-Powered Features
-- ✅ **AI resource analysis** (`a` key) - Comprehensive resource insights
-- ✅ **Terraform code generation** (`T` key) - Generate .tf files for resources
-- ✅ **Bicep code generation** (`B` key) - Generate .bicep files for resources  
-- ✅ **Cost optimization analysis** (`O` key) - AI-powered cost savings suggestions
-- ✅ **OpenAI integration** with configurable API endpoints and keys
+### 🌐 **Azure & Infrastructure**
+- ✅ **Demo Mode**: Full functionality without Azure credentials
+- ✅ **IaC File Scanning**: Terraform/Bicep file detection and analysis
+- ✅ **Resource Type Detection**: Service-specific icons and actions
+- ✅ **Multi-Subscription**: Easy Azure context switching
+- ✅ **Configuration System**: YAML-based user preferences
 
-### Interactive Dialogs & Actions
-- ✅ **Metrics dashboard** (`M` key) - Real-time resource metrics with trends
-- ✅ **Resource editor** (`E` key) - Edit resource configurations safely
-- ✅ **Delete confirmation** (`Ctrl+D`) - Safe resource deletion with warnings
-- ✅ **Resource actions menu** - Context-aware action suggestions
-- ✅ **Keyboard shortcuts help** (`F1`) - Complete shortcut reference
-
-### Technical Improvements
-- ✅ **Enhanced error handling** with graceful fallbacks to demo data
-- ✅ **Responsive rendering** with proper panel sizing and alignment
-- ✅ **Azure CLI integration** with SDK fallback support
-- ✅ **Demo mode** for offline usage and testing
-- ✅ **Configuration system** with YAML support
-
-### Advanced Integrations
-- ✅ **Multiple AI providers** (OpenAI, MCP server support)
-- ✅ **Azure SDK integration** for reliable resource operations
-- ✅ **Infrastructure as Code** support for Terraform and Bicep
-- ✅ **Resource type detection** with service-specific icons and actions
+### 🎯 **User Experience**
+- ✅ **Tab Management**: Open/close/switch resource tabs seamlessly
+- ✅ **Visual Feedback**: Clear selection highlighting and status indicators
+- ✅ **Progressive Enhancement**: Works offline with demo data
+- ✅ **Keyboard-First**: Complete keyboard navigation support
+- ✅ **Professional Styling**: Azure-themed consistent interface
 
 ---
 
-## In Progress / Next Steps
+## 🚧 **IN PROGRESS / NEXT STEPS**
 
-- **AI-driven code generation, validation, troubleshooting**: Wire Copilot agents into resource creation and deployment workflows (TUI/CLI)
-- **Streaming/multi-turn context** for AI interactions
-- **Polish TUI/CLI UX**: error handling, progress, user guidance
-- **Config-driven customization**: agents, prompts, user scenarios
-- **In-place IaC editing and validation**
-- **Expand resource types and advanced actions** (SSH, advanced monitoring)
-- **Implement multi-tab/window TUI**: Add tab/window management, tabbed connections for AKS/VM, monitoring, health checks, and nested interfaces. Implement tab open/close logic and status line. Add popup for keyboard shortcuts. **Resource/connection/monitoring actions are now wired to open new tabs.**
+### 🔮 **Advanced AI Features**
+- **Multi-turn Conversations**: Context-aware AI interactions
+- **Streaming Responses**: Real-time AI analysis updates
+- **Custom AI Agents**: Specialized agents for different Azure scenarios
+- **AI-Guided Workflows**: Intelligent resource creation wizards
 
----
+### 🏗️ **Infrastructure Enhancements**
+- **In-Place IaC Editing**: Direct Terraform/Bicep file modification
+- **Deployment Pipelines**: Integrated CI/CD workflow support
+- **State Management**: Terraform state file analysis and operations
+- **Template Library**: Pre-built infrastructure patterns
 
-## File Map
+### 🔐 **Advanced Operations**
+- **SSH Integration**: Direct VM access from TUI
+- **Advanced Monitoring**: Real-time log streaming and analysis
+- **Security Scanning**: Automated compliance and vulnerability checks
+- **Backup Management**: Resource backup and restore operations
 
-- `cmd/main.go`: TUI/CLI logic, resource loading, IaC panel, popups, CLI entry points, tab/connection/monitoring logic
-- `internal/azure/tfbicep/filescan.go`, `tfbicep.go`: IaC file scanning, Terraform/Bicep helpers
-- `internal/config/config.go`: YAML config loader, naming standards
-- `internal/openai/openai.go`: OpenAI/Copilot integration, agent/role/prompt logic
-- `internal/tui/tui.go`: TUI logic, panels, popups, tab/window management
-- `~/.config/azure-tui/config.yaml`: user config for naming, AI, etc.
-- `README.md`, `README-flake.md`, `project-plan.md`: user and dev documentation
-
----
-
-## AI Integration
-
-- **Copilot agents**: Defined for IaC, troubleshooting, security, cost, documentation, CLI help
-- **Scenario-driven agent selection**: Helper function for mapping scenario to agent
-- **Configurable**: Model, API base, agent, and prompt can be set via config/env
-- **Usage**: All TUI/CLI workflows can invoke AI for code generation, validation, troubleshooting, and documentation
+### ⚙️ **Platform Extensions**
+- **Plugin System**: Extensible architecture for custom integrations
+- **API Server**: REST API for external tool integration
+- **Cloud Shell Integration**: Azure Cloud Shell connectivity
+- **Multi-Cloud Support**: AWS and GCP resource management
 
 ---
 
-## Manual/Docs To Update
+## 🎯 **CURRENT ARCHITECTURE**
+
+### Core Components
+```
+├── cmd/main.go                 # Application entry point & TUI logic
+├── internal/
+│   ├── tui/tui.go             # Tree view, powerline, tab management
+│   ├── azure/                 # Azure service integrations
+│   │   ├── azuresdk/          # Azure SDK client
+│   │   ├── aks/               # AKS cluster management
+│   │   ├── storage/           # Storage account operations
+│   │   ├── keyvault/          # Key Vault management
+│   │   └── tfbicep/           # IaC file scanning & analysis
+│   ├── openai/                # AI integration (OpenAI GPT-4)
+│   ├── config/                # YAML configuration management
+│   └── terraform/             # Terraform operations
+```
+
+### Key Design Patterns
+- **Bubble Tea Framework**: Modern TUI with event-driven architecture
+- **Lipgloss Styling**: Consistent, beautiful terminal UI
+- **Modular Azure Integration**: Separate packages for each Azure service
+- **AI-First Design**: AI integration at every level of operation
+- **Configuration-Driven**: YAML-based customization and preferences
+
+---
+
+## 🛣️ **ROADMAP PRIORITIES**
+
+### Phase 1: Polish & Stability (Current)
+- **Bug Fixes**: Address any remaining issues from tree view implementation
+- **Performance**: Optimize rendering and Azure API calls
+- **Documentation**: Complete user manual with real-world examples
+- **Testing**: Comprehensive test coverage for all features
+
+### Phase 2: Advanced Features (Q3 2025)
+- **AI Enhancements**: Multi-turn conversations and streaming
+- **Infrastructure Operations**: Advanced IaC editing and deployment
+- **Security Features**: Compliance scanning and security analysis
+- **Monitoring Integration**: Real-time metrics and log streaming
+
+### Phase 3: Platform Extension (Q4 2025)
+- **Plugin Architecture**: Extensible system for custom integrations
+- **API Server**: REST API for external tool connectivity
+- **Multi-Cloud**: AWS and GCP resource management
+- **Enterprise Features**: RBAC, audit logging, compliance reporting
+
+---
+
+## 📝 **DOCUMENTATION STATUS**
+
+### ✅ Completed Documentation
+- ✅ **README.md**: Comprehensive overview with quick start guide
+- ✅ **FEATURES.md**: Detailed feature documentation with shortcuts
+- ✅ **project-plan.md**: Complete project roadmap and architecture
+- 🔄 **Manual.md**: Real-world usage examples and tutorials (in progress)
+
+### 📋 Documentation Priorities
+1. **User Manual**: Step-by-step tutorials for common scenarios
+2. **API Documentation**: OpenAPI spec for future API server
+3. **Development Guide**: Contributing guidelines and architecture deep-dive
+4. **Deployment Guide**: Production deployment patterns and best practices
+
+---
+
+## 🎉 **SUCCESS METRICS**
+
+The Azure TUI has successfully achieved its core objectives:
+
+- **🎨 Modern Interface**: NeoVim-style tree view with professional styling
+- **🤖 AI Integration**: Comprehensive AI-powered resource management
+- **📊 Rich Functionality**: Metrics, editing, code generation, and analysis
+- **🔧 Azure Integration**: Seamless Azure CLI + SDK connectivity
+- **🎯 User Experience**: Intuitive keyboard navigation and visual feedback
+
+The application transforms Azure resource management from a web-based experience to a powerful, keyboard-driven terminal interface that developers and DevOps professionals will love using daily.
+
+---
+
+## 🚀 **NEXT MILESTONE**
+
+**Target**: Complete Phase 1 (Polish & Stability) by end of Q2 2025
+**Deliverables**:
+- Comprehensive user manual with real-world examples
+- Performance optimizations and bug fixes
+- Enhanced error handling and user guidance
+- Complete test coverage for all major features
 
 - README.md: Add AI workflow usage, agent scenarios, config-driven customization, multi-tab/window TUI, and resource/connection/monitoring tab actions
 - README-flake.md: Nix/Flake usage, update for new config and AI features

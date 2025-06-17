@@ -78,6 +78,293 @@ func (tm *TabManager) ActiveTab() *Tab {
 	return &tm.Tabs[tm.ActiveIndex]
 }
 
+// TreeNode represents a node in the resource tree
+type TreeNode struct {
+	Name         string
+	Type         string // "group", "resource", "folder"
+	Icon         string
+	Children     []*TreeNode
+	Expanded     bool
+	Selected     bool
+	ResourceData interface{} // stores actual resource data
+	Level        int         // nesting level for indentation
+}
+
+// TreeView manages the hierarchical display of resources
+type TreeView struct {
+	Root         *TreeNode
+	SelectedPath []int // path to selected node
+	ScrollOffset int
+	MaxVisible   int
+}
+
+// NewTreeView creates a new tree view
+func NewTreeView() *TreeView {
+	return &TreeView{
+		Root:         &TreeNode{Name: "Azure Resources", Type: "root", Icon: "☁️", Expanded: true},
+		SelectedPath: []int{},
+		ScrollOffset: 0,
+		MaxVisible:   20,
+	}
+}
+
+// AddResourceGroup adds a resource group to the tree
+func (tv *TreeView) AddResourceGroup(name, location string) *TreeNode {
+	node := &TreeNode{
+		Name:     name,
+		Type:     "group",
+		Icon:     "🗂️",
+		Children: []*TreeNode{},
+		Expanded: false,
+		Level:    1,
+	}
+	tv.Root.Children = append(tv.Root.Children, node)
+	return node
+}
+
+// AddResource adds a resource to a resource group
+func (tv *TreeView) AddResource(groupNode *TreeNode, name, resourceType string, data interface{}) {
+	icon := GetResourceIcon(resourceType)
+	resource := &TreeNode{
+		Name:         name,
+		Type:         "resource",
+		Icon:         icon,
+		Children:     []*TreeNode{},
+		Expanded:     false,
+		ResourceData: data,
+		Level:        2,
+	}
+	groupNode.Children = append(groupNode.Children, resource)
+}
+
+// GetResourceIcon returns appropriate icon for resource type
+func GetResourceIcon(resourceType string) string {
+	icons := map[string]string{
+		"Microsoft.Compute/virtualMachines":          "🖥️",
+		"Microsoft.KeyVault/vaults":                  "🔑",
+		"Microsoft.Storage/storageAccounts":          "💾",
+		"Microsoft.Network/networkInterfaces":        "🔌",
+		"Microsoft.Network/publicIPAddresses":        "🌐",
+		"Microsoft.Network/virtualNetworks":          "🔗",
+		"Microsoft.Compute/disks":                    "💽",
+		"Microsoft.Insights/actionGroups":            "🚨",
+		"Microsoft.Insights/metricAlerts":            "📊",
+		"Microsoft.ContainerService/managedClusters": "🚢",
+		"Microsoft.Web/sites":                        "🌐",
+		"Microsoft.Sql/servers":                      "🗄️",
+		"Microsoft.DocumentDB/databaseAccounts":      "📄",
+	}
+	if icon, exists := icons[resourceType]; exists {
+		return icon
+	}
+	return "📦"
+}
+
+// RenderTreeView renders the tree view as a string
+func (tv *TreeView) RenderTreeView(width, height int) string {
+	style := lipgloss.NewStyle().
+		Width(width).
+		Height(height).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("63")).
+		Background(lipgloss.Color("236")).
+		Foreground(lipgloss.Color("252")).
+		Padding(1, 1)
+
+	var lines []string
+	tv.renderNode(tv.Root, &lines, 0)
+
+	// Show loading message if tree is empty
+	if len(lines) == 0 {
+		lines = append(lines, "☁️ Azure Resources")
+		lines = append(lines, "")
+		lines = append(lines, "🔄 Loading resource groups...")
+		lines = append(lines, "")
+		lines = append(lines, "Press ? for help")
+	}
+
+	// Handle scrolling
+	visibleLines := lines
+	if len(lines) > tv.MaxVisible {
+		start := tv.ScrollOffset
+		end := start + tv.MaxVisible
+		if end > len(lines) {
+			end = len(lines)
+		}
+		if start < len(lines) {
+			visibleLines = lines[start:end]
+		}
+	}
+
+	// Add scroll indicators
+	if tv.ScrollOffset > 0 {
+		visibleLines = append([]string{"  ↑ More above ↑"}, visibleLines...)
+	}
+	if tv.ScrollOffset+tv.MaxVisible < len(lines) {
+		visibleLines = append(visibleLines, "  ↓ More below ↓")
+	}
+
+	content := strings.Join(visibleLines, "\n")
+	return style.Render(content)
+}
+
+// renderNode recursively renders tree nodes
+func (tv *TreeView) renderNode(node *TreeNode, lines *[]string, depth int) {
+	if node.Type == "root" {
+		// Render root children directly
+		for _, child := range node.Children {
+			tv.renderNode(child, lines, depth)
+		}
+		return
+	}
+
+	// Create indentation
+	indent := strings.Repeat("  ", depth)
+
+	// Create expand/collapse indicator
+	indicator := ""
+	if len(node.Children) > 0 {
+		if node.Expanded {
+			indicator = "▼ "
+		} else {
+			indicator = "▶ "
+		}
+	} else {
+		indicator = "  "
+	}
+
+	// Create the line
+	line := fmt.Sprintf("%s%s%s %s", indent, indicator, node.Icon, node.Name)
+
+	// Highlight if selected
+	if node.Selected {
+		line = lipgloss.NewStyle().
+			Background(lipgloss.Color("33")).
+			Foreground(lipgloss.Color("230")).
+			Render(line)
+	}
+
+	*lines = append(*lines, line)
+
+	// Render children if expanded
+	if node.Expanded {
+		for _, child := range node.Children {
+			tv.renderNode(child, lines, depth+1)
+		}
+	}
+}
+
+// PowerlineSegment represents a segment in the powerline statusbar
+type PowerlineSegment struct {
+	Text       string
+	Background lipgloss.Color
+	Foreground lipgloss.Color
+	Separator  string
+}
+
+// StatusBar represents a powerline-style status bar
+type StatusBar struct {
+	Segments   []PowerlineSegment
+	RightAlign []PowerlineSegment
+	Height     int
+	Width      int
+}
+
+// CreatePowerlineStatusBar creates a powerline-style status bar
+func CreatePowerlineStatusBar(width int) *StatusBar {
+	return &StatusBar{
+		Segments:   []PowerlineSegment{},
+		RightAlign: []PowerlineSegment{},
+		Height:     1,
+		Width:      width,
+	}
+}
+
+// AddSegment adds a segment to the status bar
+func (sb *StatusBar) AddSegment(text string, bg, fg lipgloss.Color) {
+	segment := PowerlineSegment{
+		Text:       text,
+		Background: bg,
+		Foreground: fg,
+		Separator:  "",
+	}
+	sb.Segments = append(sb.Segments, segment)
+}
+
+// AddRightSegment adds a right-aligned segment
+func (sb *StatusBar) AddRightSegment(text string, bg, fg lipgloss.Color) {
+	segment := PowerlineSegment{
+		Text:       text,
+		Background: bg,
+		Foreground: fg,
+		Separator:  "",
+	}
+	sb.RightAlign = append(sb.RightAlign, segment)
+}
+
+// RenderStatusBar renders the powerline status bar
+func (sb *StatusBar) RenderStatusBar() string {
+	var leftSide strings.Builder
+	var rightSide strings.Builder
+
+	// Render left segments
+	for i, segment := range sb.Segments {
+		style := lipgloss.NewStyle().
+			Background(segment.Background).
+			Foreground(segment.Foreground).
+			Padding(0, 1)
+
+		leftSide.WriteString(style.Render(segment.Text))
+
+		// Add powerline separator
+		if i < len(sb.Segments)-1 {
+			nextBg := sb.Segments[i+1].Background
+			separator := lipgloss.NewStyle().
+				Background(nextBg).
+				Foreground(segment.Background).
+				Render("")
+			leftSide.WriteString(separator)
+		}
+	}
+
+	// Render right segments
+	for i := len(sb.RightAlign) - 1; i >= 0; i-- {
+		segment := sb.RightAlign[i]
+		style := lipgloss.NewStyle().
+			Background(segment.Background).
+			Foreground(segment.Foreground).
+			Padding(0, 1)
+
+		// Add powerline separator before segment
+		if i < len(sb.RightAlign)-1 {
+			prevBg := sb.RightAlign[i+1].Background
+			separator := lipgloss.NewStyle().
+				Background(segment.Background).
+				Foreground(prevBg).
+				Render("")
+			rightSide.WriteString(separator)
+		}
+
+		rightSide.WriteString(style.Render(segment.Text))
+	}
+
+	// Combine left and right with spacing
+	leftStr := leftSide.String()
+	rightStr := rightSide.String()
+
+	// Calculate spaces needed
+	leftWidth := lipgloss.Width(leftStr)
+	rightWidth := lipgloss.Width(rightStr)
+	spacesNeeded := sb.Width - leftWidth - rightWidth
+	if spacesNeeded < 0 {
+		spacesNeeded = 0
+	}
+
+	spaces := strings.Repeat(" ", spacesNeeded)
+
+	return leftStr + spaces + rightStr
+}
+
 // RenderPopup renders a popup window for alarms/errors
 func RenderPopup(msg PopupMsg) string {
 	border := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Padding(1, 2)
