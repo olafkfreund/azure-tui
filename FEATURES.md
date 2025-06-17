@@ -1,0 +1,104 @@
+# Azure TUI - Advanced Features
+
+## AI-Powered Resource Management
+
+The Azure TUI now includes comprehensive AI-powered features for intelligent resource management, analysis, and code generation.
+
+### Key Features
+
+#### 🤖 AI Resource Analysis
+- Press `a` to get AI-powered analysis of any selected resource
+- Provides configuration summary, optimization recommendations, and security considerations
+- Works with OpenAI API (set `OPENAI_API_KEY` environment variable)
+
+#### 📊 Interactive Metrics Dashboard
+- Press `M` to view real-time metrics for any resource
+- Shows CPU, memory, disk, and network usage with color-coded alerts
+- Includes ASCII trend graphs and interactive controls
+
+#### ✏️ Resource Configuration Editor
+- Press `E` to edit resource configurations in a guided dialog
+- Shows current settings with field-by-field editing
+- Validates changes before applying
+
+#### 🗑️ Safe Resource Deletion
+- Press `Ctrl+D` to initiate resource deletion with confirmation dialog
+- Shows resource details and requires explicit confirmation
+- Prevents accidental deletions with clear warnings
+
+#### 🔧 Infrastructure as Code Generation
+- Press `T` to generate Terraform code for any resource
+- Press `B` to generate Bicep code with AI assistance
+- Creates complete, deployable infrastructure templates
+
+#### 💰 Cost Optimization Analysis
+- Press `O` to get AI-powered cost optimization suggestions
+- Analyzes entire resource groups for savings opportunities
+- Provides right-sizing and reserved instance recommendations
+
+### Navigation & Shortcuts
+
+| Key | Action |
+|-----|--------|
+| `↑/↓` | Navigate resource groups |
+| `←/→` | Navigate resources within group |
+| `Enter` | Open resource in new tab |
+| `Tab/Shift+Tab` | Switch between tabs |
+| `Ctrl+W` | Close current tab |
+| `a` | AI analysis of selected resource |
+| `M` | Show metrics dashboard |
+| `E` | Edit resource configuration |
+| `Ctrl+D` | Delete resource (with confirmation) |
+| `T` | Generate Terraform code |
+| `B` | Generate Bicep code |
+| `O` | Cost optimization analysis |
+| `F1` | Show all keyboard shortcuts |
+| `Esc` | Close any open dialog/popup |
+| `q` | Quit application |
+
+### Tab System
+
+The enhanced TUI features a sophisticated tab system:
+
+- **Main Browser Tab**: Non-closable tab showing resource groups and resources
+- **Resource Tabs**: Automatically created when opening resources with `Enter`
+- **Tab Icons**: Azure service-specific icons for easy identification
+- **Tab Management**: Full support for opening, closing, and switching tabs
+
+### Visual Enhancements
+
+- **Modern Styling**: Uses lipgloss for consistent, beautiful UI
+- **Azure Icons**: Service-specific icons throughout the interface
+- **Color Coding**: Resource status, warnings, and selections
+- **Responsive Layout**: Panels automatically adjust content
+- **Unicode Alignment**: Proper text alignment with Unicode support
+
+### AI Integration
+
+The application integrates with multiple AI providers:
+
+- **OpenAI GPT-4**: For general analysis and code generation
+- **Model Context Protocol**: For extended AI capabilities
+- **Custom Agents**: Specialized agents for different Azure scenarios
+
+Set up AI integration:
+```bash
+export OPENAI_API_KEY="your-openai-api-key"
+export AZURE_MCP_ENDPOINT="http://localhost:5030/v1"  # optional
+```
+
+### Demo Mode
+
+If Azure CLI is not configured or unavailable, the application runs in demo mode with sample data, allowing you to explore all features without an active Azure subscription.
+
+### Architecture
+
+The application follows a modular architecture:
+
+- **TUI Layer**: Bubble Tea framework with lipgloss styling
+- **Azure Integration**: Azure SDK and CLI integration
+- **AI Services**: OpenAI and MCP client support
+- **IaC Support**: Terraform and Bicep code analysis/generation
+- **Configuration**: YAML-based user preferences
+
+This enhanced version transforms the basic Azure resource browser into a comprehensive, AI-powered cloud management platform.

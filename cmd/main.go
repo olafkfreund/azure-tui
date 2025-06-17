@@ -17,6 +17,7 @@ import (
 
 	"github.com/olafkfreund/azure-tui/internal/azure/azuresdk"
 	"github.com/olafkfreund/azure-tui/internal/azure/tfbicep"
+	"github.com/olafkfreund/azure-tui/internal/openai"
 	"github.com/olafkfreund/azure-tui/internal/tui"
 )
 
@@ -127,14 +128,26 @@ func main() {
 
 // initialModel returns the starting state for the TUI.
 func initialModel() tea.Model {
+	// Initialize AI provider with API key from environment
+	apiKey := os.Getenv("OPENAI_API_KEY")
+	var aiProvider *openai.AIProvider
+	if apiKey != "" {
+		aiProvider = openai.NewAIProvider(apiKey)
+	}
+
 	return &model{
-		profiles:           []string{"default"},
-		currentProfile:     0,
-		environments:       []string{"East US", "West Europe"},
-		currentEnv:         0,
-		loading:            true,
-		tabManager:         tui.NewTabManager(),
-		showShortcutsPopup: false,
+		profiles:              []string{"default"},
+		currentProfile:        0,
+		environments:          []string{"East US", "West Europe"},
+		currentEnv:            0,
+		loading:               true,
+		tabManager:            tui.NewTabManager(),
+		showShortcutsPopup:    false,
+		activeTabIdx:          0,
+		resourceTabs:          []tui.Tab{},
+		aiProvider:            aiProvider,
+		currentResourceConfig: make(map[string]string),
+		resourceMetrics:       make(map[string]interface{}),
 	}
 }
 
@@ -252,6 +265,26 @@ type model struct {
 
 	tabManager         *tui.TabManager // Multi-tab/window manager
 	showShortcutsPopup bool            // Show keyboard shortcuts popup
+
+	// Tab management
+	activeTabIdx int       // index of the currently active tab (0 = main browser)
+	resourceTabs []tui.Tab // tabs for opened resources (excluding main browser)
+
+	// AI-powered features
+	aiProvider  *openai.AIProvider
+	showAIPopup bool
+	aiMessage   string
+	aiLoading   bool
+
+	// Resource analysis and editing
+	showResourceActions   bool
+	showEditDialog        bool
+	showDeleteDialog      bool
+	showMetricsDialog     bool
+	editingResourceName   string
+	editingResourceType   string
+	currentResourceConfig map[string]string
+	resourceMetrics       map[string]interface{}
 }
 
 func (m *model) Init() tea.Cmd {
@@ -358,6 +391,56 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.loading || m.isLoading {
 			return m, nil
 		}
+		// Tab navigation
+		switch msg.String() {
+		case "tab":
+			if len(m.resourceTabs) > 0 {
+				m.activeTabIdx = (m.activeTabIdx + 1) % (len(m.resourceTabs) + 1)
+			}
+			return m, nil
+		case "shift+tab":
+			if len(m.resourceTabs) > 0 {
+				m.activeTabIdx = (m.activeTabIdx - 1 + len(m.resourceTabs) + 1) % (len(m.resourceTabs) + 1)
+			}
+			return m, nil
+		case "ctrl+w":
+			// Prevent closing main tab
+			if m.activeTabIdx > 0 && m.activeTabIdx <= len(m.resourceTabs) {
+				m.resourceTabs = append(m.resourceTabs[:m.activeTabIdx-1], m.resourceTabs[m.activeTabIdx:]...)
+				if m.activeTabIdx > len(m.resourceTabs) {
+					m.activeTabIdx = len(m.resourceTabs)
+				}
+			}
+			return m, nil
+		case "enter":
+			if m.activeTabIdx == 0 && len(m.resourcesInGroup) > 0 && m.resourceIdx < len(m.resourcesInGroup) {
+				res := m.resourcesInGroup[m.resourceIdx]
+				// Check if tab for this resource already exists
+				found := -1
+				for i, tab := range m.resourceTabs {
+					if tab.Meta["id"] == res.ID {
+						found = i
+						break
+					}
+				}
+				if found == -1 {
+					// Open new tab
+					tab := tui.Tab{
+						Title:    res.Name,
+						Content:  fmt.Sprintf("Name: %s\nType: %s\nLocation: %s\nID: %s", res.Name, res.Type, res.Location, res.ID),
+						Type:     res.Type,
+						Meta:     map[string]string{"id": res.ID, "type": res.Type},
+						Closable: true,
+					}
+					m.resourceTabs = append(m.resourceTabs, tab)
+					m.activeTabIdx = len(m.resourceTabs) // switch to new tab
+				} else {
+					m.activeTabIdx = found + 1 // switch to existing tab
+				}
+				return m, nil
+			}
+		}
+		// ...existing navigation for resource groups/resources...
 		if m.promptingAKS {
 			// Interactive AKS prompt flow
 			input := msg.String()
@@ -442,22 +525,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
-		case "tab":
-			m.currentSub = (m.currentSub + 1) % len(m.subscriptions)
-			if len(m.subscriptions) > 0 {
-				subID := m.subscriptions[m.currentSub].ID
-				if m.resourceGroupsCache != nil {
-					if groups, found := m.resourceGroupsCache[subID]; found && len(groups) > 0 {
-						m.resourceGroups = groups
-						return m, nil
-					}
-				}
-				m.isLoading = true
-				return m, loadResourcesCmd(subID)
-			}
-			return m, nil
-		case "shift+tab":
-			m.currentTenant = (m.currentTenant + 1) % len(m.tenants)
 		case "down":
 			if len(m.resourceGroups) > 0 {
 				m.resourceGroupIdx = (m.resourceGroupIdx + 1) % len(m.resourceGroups)
@@ -480,21 +547,6 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.resourceIdx = (m.resourceIdx - 1 + len(m.resourcesInGroup)) % len(m.resourcesInGroup)
 				m.selectedResource = m.resourcesInGroup[m.resourceIdx].Name
 			}
-		case "enter":
-			if len(m.subscriptions) > 0 {
-				setAzureSubscription(m.subscriptions[m.currentSub].ID)
-			}
-			if len(m.tenants) > 0 {
-				setAzureTenant(m.tenants[m.currentTenant].ID)
-			}
-			if len(m.resourceGroups) > 0 {
-				m.selectedGroup = m.resourceGroups[m.resourceGroupIdx].Name
-				return m, loadResourcesInGroupCmd(m.selectedGroup)
-			}
-			if len(m.subscriptions) > 0 {
-				return m, loadResourcesCmd(m.subscriptions[m.currentSub].ID)
-			}
-			return m, nil
 		case "d":
 			// Show details for selected resource
 			if m.selectedResource != "" && m.resourceIdx < len(m.resourcesInGroup) {
@@ -582,6 +634,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showCreatePopup = false
 			m.showDeployPopup = false
 			m.showShortcutsPopup = false
+			m.showAIPopup = false
+			m.showMetricsDialog = false
+			m.showEditDialog = false
+			m.showDeleteDialog = false
+			m.showResourceActions = false
 			return m, nil
 		case "F":
 			// Prompt for directory to scan (for now, use current dir or last used)
@@ -593,7 +650,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showIacPanel = !m.showIacPanel
 			return m, nil
 		case "n":
-			if m.showIacPanel && len(m.iacFiles) > 0 {
+			// Handle multiple 'n' scenarios
+			if m.showDeleteDialog {
+				// Cancel delete action
+				m.showDeleteDialog = false
+			} else if m.showIacPanel && len(m.iacFiles) > 0 {
+				// Navigate IaC files
 				m.selectedIacIdx = (m.selectedIacIdx + 1) % len(m.iacFiles)
 			}
 		case "p":
@@ -608,14 +670,22 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.showCreatePopup = true
 			return m, nil
 		case "y":
-			// Deploy selected IaC file
-			if m.showIacPanel && len(m.iacFiles) > 0 {
+			// Handle multiple 'y' scenarios
+			if m.showDeleteDialog {
+				// Confirm delete action
+				m.showDeleteDialog = false
+				// Here you would actually delete the resource
+				// For now, just show a message
+				m.aiMessage = fmt.Sprintf("Resource '%s' would be deleted here. (Demo mode - no actual deletion)", m.editingResourceName)
+				m.showAIPopup = true
+			} else if m.showIacPanel && len(m.iacFiles) > 0 {
+				// Deploy selected IaC file
 				m.deployingResource = true
 				m.deployOutput = ""
 				m.showDeployPopup = true
 				go runIaCDeployment(m.iacFiles[m.selectedIacIdx].Path, m.iacFiles[m.selectedIacIdx].Type, m)
-				return m, nil
 			}
+			return m, nil
 		case "r":
 			// Force refresh resource groups from Azure for current subscription
 			if len(m.subscriptions) > 0 {
@@ -630,15 +700,148 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			title := fmt.Sprintf("Tab %d", len(m.tabManager.Tabs)+1)
 			m.tabManager.AddTab(tui.Tab{Title: title, Content: "New tab opened.", Type: "blank", Closable: true})
 			return m, nil
-		case "ctrl+w":
-			// Close current tab
-			if len(m.tabManager.Tabs) > 0 {
-				m.tabManager.CloseTab(m.tabManager.ActiveIndex)
-			}
-			return m, nil
 		case "F1":
 			// Show shortcuts popup
 			m.showShortcutsPopup = true
+			return m, nil
+		case "a":
+			// Show AI analysis for selected resource
+			if m.activeTabIdx == 0 && len(m.resourcesInGroup) > 0 && m.resourceIdx < len(m.resourcesInGroup) {
+				res := m.resourcesInGroup[m.resourceIdx]
+				if m.aiProvider != nil {
+					m.aiLoading = true
+					m.showAIPopup = true
+					go func() {
+						details, _ := fetchResourceDetails(res.ID)
+						analysis, err := m.aiProvider.DescribeResource(res.Type, res.Name, details)
+						if err != nil {
+							m.aiMessage = "AI analysis failed: " + err.Error()
+						} else {
+							m.aiMessage = analysis
+						}
+						m.aiLoading = false
+					}()
+				} else {
+					m.aiMessage = "AI provider not configured. Set OPENAI_API_KEY environment variable."
+					m.showAIPopup = true
+				}
+			}
+			return m, nil
+		case "M":
+			// Show metrics dashboard for selected resource
+			if m.activeTabIdx == 0 && len(m.resourcesInGroup) > 0 && m.resourceIdx < len(m.resourcesInGroup) {
+				res := m.resourcesInGroup[m.resourceIdx]
+				m.showMetricsDialog = true
+				m.editingResourceName = res.Name
+				m.editingResourceType = res.Type
+				// Generate demo metrics data
+				m.resourceMetrics = map[string]interface{}{
+					"cpu_usage":    75.5,
+					"memory_usage": 82.3,
+					"network_in":   12.5,
+					"network_out":  8.7,
+					"disk_read":    45.2,
+					"disk_write":   23.1,
+				}
+			}
+			return m, nil
+		case "E":
+			// Show edit dialog for selected resource
+			if m.activeTabIdx == 0 && len(m.resourcesInGroup) > 0 && m.resourceIdx < len(m.resourcesInGroup) {
+				res := m.resourcesInGroup[m.resourceIdx]
+				m.showEditDialog = true
+				m.editingResourceName = res.Name
+				m.editingResourceType = res.Type
+				// Generate demo config data
+				m.currentResourceConfig = map[string]string{
+					"Name":           res.Name,
+					"Type":           res.Type,
+					"Location":       res.Location,
+					"Resource Group": m.selectedGroup,
+					"Status":         "Running",
+				}
+			}
+			return m, nil
+		case "D":
+			// Show delete confirmation dialog
+			if m.activeTabIdx == 0 && len(m.resourcesInGroup) > 0 && m.resourceIdx < len(m.resourcesInGroup) {
+				res := m.resourcesInGroup[m.resourceIdx]
+				m.showDeleteDialog = true
+				m.editingResourceName = res.Name
+				m.editingResourceType = res.Type
+			}
+			return m, nil
+		case "T":
+			// Generate Terraform code for selected resource
+			if m.activeTabIdx == 0 && len(m.resourcesInGroup) > 0 && m.resourceIdx < len(m.resourcesInGroup) {
+				res := m.resourcesInGroup[m.resourceIdx]
+				if m.aiProvider != nil {
+					m.aiLoading = true
+					m.showAIPopup = true
+					go func() {
+						requirements := fmt.Sprintf("Resource: %s\nType: %s\nLocation: %s", res.Name, res.Type, res.Location)
+						code, err := m.aiProvider.GenerateTerraformCode(res.Type, requirements)
+						if err != nil {
+							m.aiMessage = "Terraform generation failed: " + err.Error()
+						} else {
+							m.aiMessage = "Generated Terraform Code:\n\n" + code
+						}
+						m.aiLoading = false
+					}()
+				} else {
+					m.aiMessage = "AI provider not configured. Set OPENAI_API_KEY environment variable."
+					m.showAIPopup = true
+				}
+			}
+			return m, nil
+		case "B":
+			// Generate Bicep code for selected resource
+			if m.activeTabIdx == 0 && len(m.resourcesInGroup) > 0 && m.resourceIdx < len(m.resourcesInGroup) {
+				res := m.resourcesInGroup[m.resourceIdx]
+				if m.aiProvider != nil {
+					m.aiLoading = true
+					m.showAIPopup = true
+					go func() {
+						requirements := fmt.Sprintf("Resource: %s\nType: %s\nLocation: %s", res.Name, res.Type, res.Location)
+						code, err := m.aiProvider.GenerateBicepCode(res.Type, requirements)
+						if err != nil {
+							m.aiMessage = "Bicep generation failed: " + err.Error()
+						} else {
+							m.aiMessage = "Generated Bicep Code:\n\n" + code
+						}
+						m.aiLoading = false
+					}()
+				} else {
+					m.aiMessage = "AI provider not configured. Set OPENAI_API_KEY environment variable."
+					m.showAIPopup = true
+				}
+			}
+			return m, nil
+		case "O":
+			// Cost optimization analysis for current resource group
+			if m.aiProvider != nil && len(m.resourcesInGroup) > 0 {
+				m.aiLoading = true
+				m.showAIPopup = true
+				go func() {
+					var resources []string
+					resourceDetails := make(map[string]string)
+					for _, res := range m.resourcesInGroup {
+						resources = append(resources, res.Name)
+						details, _ := fetchResourceDetails(res.ID)
+						resourceDetails[res.Name] = details
+					}
+					optimization, err := m.aiProvider.SuggestCostOptimizations(resources, resourceDetails)
+					if err != nil {
+						m.aiMessage = "Cost optimization analysis failed: " + err.Error()
+					} else {
+						m.aiMessage = "Cost Optimization Suggestions:\n\n" + optimization
+					}
+					m.aiLoading = false
+				}()
+			} else if m.aiProvider == nil {
+				m.aiMessage = "AI provider not configured. Set OPENAI_API_KEY environment variable."
+				m.showAIPopup = true
+			}
 			return m, nil
 		}
 	}
@@ -646,196 +849,224 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m *model) View() string {
-	title := titleStyle.Render("Azure TUI - Welcome!")
-	if m.loading {
-		return title + "\nLoading Azure subscriptions and tenants..."
-	}
-	if m.loadErr != "" {
-		return title + "\nError: " + m.loadErr
-	}
-	var sub, tenant string
-	if len(m.subscriptions) > 0 {
-		s := m.subscriptions[m.currentSub]
-		sub = s.Name + " (" + s.ID + ")"
+	tabs := []tui.Tab{{Title: "Resource Browser", Closable: false, Type: "resourcegroup"}}
+	tabs = append(tabs, m.resourceTabs...)
+	tabBar := tui.RenderTabsWithActive(tabs, m.activeTabIdx)
+	var content string
+	if m.activeTabIdx == 0 {
+		// Main resource browser: left = groups, right = resources
+		leftPanel := renderLeftPanel(m)
+		rightPanel := renderRightPanel(m)
+		panels := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
+		content = lipgloss.JoinVertical(lipgloss.Left, panels)
 	} else {
-		sub = "No subscriptions found"
-	}
-	if len(m.tenants) > 0 {
-		t := m.tenants[m.currentTenant]
-		tenant = t.Name + " (" + t.ID + ")"
-	} else {
-		tenant = "No tenants found"
-	}
-	activeSub, activeTenant := getActiveContext()
-	contextLine := subtitleStyle.Render("Active: Subscription: " + activeSub + " | Tenant: " + activeTenant)
-	subtitle := subtitleStyle.Render(
-		"tab: next subscription | shift+tab: next tenant | enter: set active | Subscription: " + sub + " | Tenant: " + tenant,
-	)
-	help := helpStyle.Render("Press q to quit. Use tab/shift+tab to switch. Enter to set active context.")
-
-	// Show loading spinner if loading
-	if m.isLoading {
-		return title + "\n" + contextLine + "\n" + subtitle + "\n\n" + "Loading... Please wait.\n" + help
+		// Resource tab: show details for that resource
+		resTab := m.resourceTabs[m.activeTabIdx-1]
+		// Optionally fetch and update details if needed
+		content = resTab.Content
 	}
 
-	// If there are open tabs, render the tab UI instead of the main panels
-	if m.tabManager != nil && len(m.tabManager.Tabs) > 0 {
-		status := "Env: " + m.environments[m.currentEnv]
-		return tui.RenderTabs(m.tabManager, status)
+	baseView := renderMainBoxLipgloss(tabBar + "\n" + content)
+
+	// Show dialogs and popups on top of the main view
+	if m.showAIPopup {
+		var aiContent string
+		if m.aiLoading {
+			aiContent = "🤖 AI is analyzing... Please wait."
+		} else {
+			aiContent = m.aiMessage
+		}
+		popup := tui.RenderPopup(tui.PopupMsg{
+			Title:   "AI Analysis",
+			Content: aiContent,
+			Level:   "info",
+		})
+		return baseView + "\n\n" + popup
 	}
 
-	// Show shortcuts popup if needed
+	if m.showMetricsDialog {
+		metricsContent := tui.RenderMetricsDashboard(m.editingResourceName, m.resourceMetrics)
+		return baseView + "\n\n" + metricsContent
+	}
+
+	if m.showEditDialog {
+		editContent := tui.RenderEditDialog(m.editingResourceName, m.editingResourceType, m.currentResourceConfig)
+		return baseView + "\n\n" + editContent
+	}
+
+	if m.showDeleteDialog {
+		deleteContent := tui.RenderDeleteConfirmation(m.editingResourceName, m.editingResourceType)
+		return baseView + "\n\n" + deleteContent
+	}
+
+	if m.showResourceActions {
+		actionsContent := tui.RenderResourceActions(m.editingResourceType, m.editingResourceName)
+		return baseView + "\n\n" + actionsContent
+	}
+
 	if m.showShortcutsPopup {
 		shortcuts := map[string]string{
-			"tab":       "Next tab",
-			"shift+tab": "Previous tab",
-			"ctrl+w":    "Close tab",
-			"ctrl+t":    "New tab",
-			"ctrl+q":    "Quit",
-			"F1":        "Show shortcuts",
-			// ...add more as needed...
+			"↑/↓":    "Navigate resource groups",
+			"←/→":    "Navigate resources",
+			"Enter":  "Open resource tab",
+			"Tab":    "Switch tabs",
+			"Ctrl+W": "Close tab",
+			"a":      "AI analysis",
+			"M":      "Metrics dashboard",
+			"E":      "Edit resource",
+			"Ctrl+D": "Delete resource",
+			"T":      "Generate Terraform",
+			"B":      "Generate Bicep",
+			"O":      "Cost optimization",
+			"F1":     "Show shortcuts",
+			"Esc":    "Close popups",
+			"q":      "Quit",
 		}
-		return tui.RenderShortcutsPopup(shortcuts)
+		shortcutsContent := tui.RenderShortcutsPopup(shortcuts)
+		return baseView + "\n\n" + shortcutsContent
 	}
 
-	// Show IaC file popup if needed
-	if m.showIacFilePopup {
-		popup := lipgloss.NewStyle().Width(90).Height(30).Align(lipgloss.Center, lipgloss.Center).Border(lipgloss.RoundedBorder()).Render(m.iacFilePopupContent)
-		return "\n\n" + popup + "\n\nPress esc to close file view."
-	}
+	return baseView
+}
 
-	// Show alarms popup if needed
-	if m.showAlarmsPopup && len(m.alarms) > 0 {
-		popupWidth := 60
-		popupHeight := 10
-		alarm := m.alarms[0] // Show the first alarm for now
-		popupMsg := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("1")).Render("ALARM: " + alarm.Name + "\n" + alarm.Status + "\n" + alarm.Details)
-		box := lipgloss.NewStyle().Width(popupWidth).Height(popupHeight).Align(lipgloss.Center, lipgloss.Center).Border(lipgloss.RoundedBorder()).Render(popupMsg)
-		return "\n\n" + box + "\n\nPress esc to close popup."
-	}
+// --- Modern Panel Renderers ---
+var (
+	panelBorder      = lipgloss.RoundedBorder()
+	panelWidth       = 40
+	panelHeight      = 25
+	panelBg          = lipgloss.Color("236")
+	panelFg          = lipgloss.Color("252")
+	panelBorderColor = lipgloss.Color("63")
+	selectedBg       = lipgloss.Color("33")
+	selectedFg       = lipgloss.Color("230")
+)
 
-	// Show error log popup if needed
-	if m.showMatrixPopup && len(m.usageMatrix) > 0 {
-		popupWidth := 70
-		popupHeight := 12
-		popupMsg := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9")).Render("LOG ERROR:\n" + renderUsageMatrix(m.usageHeaders, m.usageMatrix))
-		box := lipgloss.NewStyle().Width(popupWidth).Height(popupHeight).Align(lipgloss.Center, lipgloss.Center).Border(lipgloss.RoundedBorder()).Render(popupMsg)
-		return "\n\n" + box + "\n\nPress esc to close popup."
-	}
+func renderLeftPanel(m *model) string {
+	style := lipgloss.NewStyle().
+		Width(panelWidth).
+		Height(panelHeight).
+		Border(panelBorder).
+		BorderForeground(panelBorderColor).
+		Background(panelBg).
+		Foreground(panelFg).
+		Padding(1, 2).
+		AlignHorizontal(lipgloss.Left)
 
-	// Show IaC file panel if needed
-	if m.showIacPanel {
-		var iacPanel string
-		if m.iacScanLoading {
-			iacPanel = "Scanning for Terraform/Bicep files..."
-		} else if m.iacScanErr != "" {
-			iacPanel = "IaC scan error: " + m.iacScanErr
-		} else if len(m.iacFiles) == 0 {
-			iacPanel = "No Terraform/Bicep/tfstate files found. Press F to scan."
-		} else {
-			iacPanel = "IaC Files:\n"
-			for i, f := range m.iacFiles {
-				selected := "  "
-				if i == m.selectedIacIdx {
-					selected = "> "
-				}
-				iacPanel += selected + f.Path + " [" + f.Type + "]\n"
-			}
-		}
-		help := helpStyle.Render("n: next | p: prev | F: scan | v: view file | esc: close IaC panel")
-		return title + "\n" + iacPanel + "\n" + help
-	}
+	var lines []string
+	folderIcon := "🗂️"
 
-	// Show resource creation popup if needed
-	if m.showCreatePopup {
-		popup := lipgloss.NewStyle().Width(80).Height(16).Align(lipgloss.Center, lipgloss.Center).Border(lipgloss.RoundedBorder()).Render(m.createAIMessage)
-		return "\n\n" + popup + "\n\nPress esc to cancel."
-	}
-
-	// Show deployment popup if needed
-	if m.showDeployPopup {
-		popup := lipgloss.NewStyle().Width(90).Height(30).Align(lipgloss.Center, lipgloss.Center).Border(lipgloss.RoundedBorder()).Render(m.deployOutput)
-		return "\n\n" + popup + "\n\nPress esc to cancel deployment."
-	}
-
-	// Build left panel: resource list
-	var leftPanel string
 	if m.resourceLoadErr != "" {
-		leftPanel = "Resource group error: " + m.resourceLoadErr
+		lines = append(lines, "❌ "+m.resourceLoadErr)
 	} else if len(m.resourceGroups) == 0 {
-		leftPanel = "No resource groups found."
+		lines = append(lines, "No resource groups found.")
 	} else {
-		leftPanel = "Resource Groups:\n"
+		lines = append(lines, lipgloss.NewStyle().Bold(true).Render("Resource Groups"))
+		lines = append(lines, "")
 		for i, rg := range m.resourceGroups {
-			selected := "  "
+			prefix := "  "
 			if i == m.resourceGroupIdx {
-				selected = "→ " // Arrow for selected
+				prefix = "→ "
 			}
-			icon := "📁"
-			leftPanel += fmt.Sprintf("%s%s %-24s %s\n", selected, icon, rg.Name, rg.Location)
-		}
-		if m.selectedGroup != "" && len(m.resourcesInGroup) > 0 {
-			leftPanel += "\nResources in '" + m.selectedGroup + "':\n"
-			for i, r := range m.resourcesInGroup {
-				selected := "  "
-				if i == m.resourceIdx {
-					selected = "→ "
-				}
-				var icon string
-				switch {
-				case strings.Contains(r.Type, "virtualMachines"):
-					icon = "🖥️"
-				case strings.Contains(r.Type, "keyVault"):
-					icon = "🔑"
-				case strings.Contains(r.Type, "storageAccounts"):
-					icon = "💾"
-				default:
-					icon = "📦"
-				}
-				leftPanel += fmt.Sprintf("%s%s %-24s [%s]\n", selected, icon, r.Name, r.Type)
+			line := fmt.Sprintf("%s%s %s", prefix, folderIcon, rg.Name)
+			if i == m.resourceGroupIdx {
+				line = lipgloss.NewStyle().Background(selectedBg).Foreground(selectedFg).Render(line)
 			}
+			lines = append(lines, line)
 		}
 	}
 
-	// Build right panel: details
-	var rightPanel string
-	if m.selectedResource != "" && m.resourceIdx < len(m.resourcesInGroup) {
-		resource := m.resourcesInGroup[m.resourceIdx]
-		details, err := fetchResourceDetails(resource.ID)
-		if err != nil {
-			rightPanel = "Details error: " + err.Error()
+	content := strings.Join(lines, "\n")
+	return style.Render(content)
+}
+
+func renderRightPanel(m *model) string {
+	style := lipgloss.NewStyle().
+		Width(panelWidth).
+		Height(panelHeight).
+		Border(panelBorder).
+		BorderForeground(panelBorderColor).
+		Background(panelBg).
+		Foreground(panelFg).
+		Padding(1, 2).
+		AlignHorizontal(lipgloss.Left)
+
+	azureIcons := map[string]string{
+		"virtualmachines":   "🖥️",
+		"keyvault":          "🔑",
+		"storageaccounts":   "💾",
+		"networkinterfaces": "🔌",
+		"publicipaddresses": "🌐",
+		"virtualnetworks":   "🔗",
+		"disks":             "💽",
+		"actiongroups":      "🚨",
+		"metricalerts":      "📊",
+		"extensions":        "🧩",
+		"default":           "📦",
+	}
+
+	var lines []string
+
+	if m.selectedGroup == "" || len(m.resourcesInGroup) == 0 {
+		if m.selectedGroup != "" {
+			lines = append(lines, lipgloss.NewStyle().Bold(true).Render("Resources"))
+			lines = append(lines, "")
+			lines = append(lines, "Loading resources...")
 		} else {
-			rightPanel = fmt.Sprintf("Name: %s\nType: %s\nLocation: %s\nID: %s\n\n%s", resource.Name, resource.Type, resource.Location, resource.ID, details)
+			lines = append(lines, "Select a resource group")
+			lines = append(lines, "to see its resources")
 		}
 	} else {
-		rightPanel = "Select a resource to see details."
+		lines = append(lines, lipgloss.NewStyle().Bold(true).Render("Resources"))
+		lines = append(lines, lipgloss.NewStyle().Faint(true).Render("in "+m.selectedGroup))
+		lines = append(lines, "")
+
+		for i, r := range m.resourcesInGroup {
+			prefix := "  "
+			if i == m.resourceIdx {
+				prefix = "→ "
+			}
+
+			// Get icon by type
+			icon := azureIcons["default"]
+			for k, v := range azureIcons {
+				if k != "default" && strings.Contains(strings.ToLower(r.Type), k) {
+					icon = v
+					break
+				}
+			}
+
+			// Truncate name if too long
+			name := r.Name
+			if len(name) > 25 {
+				name = name[:22] + "..."
+			}
+
+			line := fmt.Sprintf("%s%s %s", prefix, icon, name)
+			if i == m.resourceIdx {
+				line = lipgloss.NewStyle().Background(selectedBg).Foreground(selectedFg).Render(line)
+			}
+			lines = append(lines, line)
+		}
 	}
 
-	// Box layout: left and right panels side by side
-	boxWidth := 40
-	leftLines := strings.Split(leftPanel, "\n")
-	rightLines := strings.Split(rightPanel, "\n")
-	maxLines := len(leftLines)
-	if len(rightLines) > maxLines {
-		maxLines = len(rightLines)
-	}
-	var box strings.Builder
-	box.WriteString("┌" + strings.Repeat("─", boxWidth) + "┬" + strings.Repeat("─", boxWidth) + "┐\n")
-	for i := 0; i < maxLines; i++ {
-		l := ""
-		if i < len(leftLines) {
-			l = leftLines[i]
-		}
-		r := ""
-		if i < len(rightLines) {
-			r = rightLines[i]
-		}
-		// Clean up trailing spaces and align
-		box.WriteString(fmt.Sprintf("│%-*s│%-*s│\n", boxWidth, strings.TrimRight(l, " "), boxWidth, strings.TrimRight(r, " ")))
-	}
-	box.WriteString("└" + strings.Repeat("─", boxWidth) + "┴" + strings.Repeat("─", boxWidth) + "┘\n")
+	content := strings.Join(lines, "\n")
+	return style.Render(content)
+}
 
-	return title + "\n" + contextLine + "\n" + subtitle + "\n\n" + box.String() + "\n" + help
+// --- Modern Main Box with Lipgloss ---
+func renderMainBoxLipgloss(content string) string {
+	width := 90
+	height := 36
+	boxStyle := lipgloss.NewStyle().Width(width).Height(height).Border(lipgloss.DoubleBorder()).BorderForeground(lipgloss.Color("63")).Align(lipgloss.Center, lipgloss.Center).Background(lipgloss.Color("235")).Foreground(lipgloss.Color("252")).Padding(0, 1)
+	return boxStyle.Render(content)
+}
+
+// centerBox centers the given string in a box of fixed width using lipgloss.
+func centerBox(content string) string {
+	width := 90
+	height := 36
+	style := lipgloss.NewStyle().Width(width).Height(height).Align(lipgloss.Center, lipgloss.Center)
+	return style.Render(content)
 }
 
 // fetchAzureSubsAndTenants uses Azure CLI to get subscriptions and tenants as a quick cross-platform solution.
