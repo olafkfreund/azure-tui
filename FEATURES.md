@@ -94,17 +94,15 @@ The enhanced TUI features a sophisticated interface system with two modes:
 
 ### AI Integration
 
-The application integrates with multiple AI providers:
+The application integrates with AI providers:
 
 - **OpenAI GPT-4**: For general analysis and code generation
-- **Model Context Protocol**: For extended AI capabilities
 - **Custom Agents**: Specialized agents for different Azure scenarios
 
 Set up AI integration:
 
 ```bash
 export OPENAI_API_KEY="your-openai-api-key"
-export AZURE_MCP_ENDPOINT="http://localhost:5030/v1"  # optional
 ```
 
 ### Demo Mode
@@ -117,7 +115,7 @@ The application follows a modular architecture:
 
 - **TUI Layer**: Bubble Tea framework with lipgloss styling
 - **Azure Integration**: Azure SDK and CLI integration
-- **AI Services**: OpenAI and MCP client support
+- **AI Services**: OpenAI client support
 - **IaC Support**: Terraform and Bicep code analysis/generation
 - **Configuration**: YAML-based user preferences
 

@@ -101,6 +101,26 @@ type storageErrMsg string
 type iacFilesMsg []struct{ Path, Type string }
 type iacFilesErrMsg string
 
+// getSelectedResource returns the currently selected resource from either tree view or legacy selection
+func (m *model) getSelectedResource() *AzureResource {
+	// Try to get resource from tree view first
+	if m.showTreeView && m.treeView != nil {
+		selectedNode := m.treeView.GetSelectedNode()
+		if selectedNode != nil && selectedNode.Type == "resource" {
+			if resourceData, ok := selectedNode.ResourceData.(AzureResource); ok {
+				return &resourceData
+			}
+		}
+	}
+
+	// Fallback to legacy resource selection
+	if m.activeTabIdx == 0 && len(m.resourcesInGroup) > 0 && m.resourceIdx < len(m.resourcesInGroup) {
+		return &m.resourcesInGroup[m.resourceIdx]
+	}
+
+	return nil
+}
+
 func main() {
 	if len(os.Args) > 1 {
 		if os.Args[1] == "--create" {
@@ -437,9 +457,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					for _, resource := range msg.resources {
 						m.treeView.AddResource(child, resource.Name, resource.Type, resource)
 					}
+					// Ensure the group is expanded since we just loaded resources
+					child.Expanded = true
 					break
 				}
 			}
+
+			// Ensure proper selection state in tree view
+			m.treeView.EnsureSelection()
 		}
 		return m, nil
 	case resourcesInGroupErrMsg:
@@ -532,37 +557,41 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "enter":
-			if m.showTreeView && len(m.resourcesInGroup) > 0 && m.resourceIdx < len(m.resourcesInGroup) {
-				// Tree view mode: open resource in right-side content tab
-				res := m.resourcesInGroup[m.resourceIdx]
+			if m.showTreeView && m.treeView != nil {
+				// Tree view mode: get the currently selected node
+				selectedNode := m.treeView.GetSelectedNode()
+				if selectedNode != nil && selectedNode.Type == "resource" {
+					// Get the resource data from the tree node
+					if resourceData, ok := selectedNode.ResourceData.(AzureResource); ok {
+						// Check if content tab for this resource already exists
+						found := -1
+						for i, tab := range m.contentTabs {
+							if tab.Meta["id"] == resourceData.ID {
+								found = i
+								break
+							}
+						}
 
-				// Check if content tab for this resource already exists
-				found := -1
-				for i, tab := range m.contentTabs {
-					if tab.Meta["id"] == res.ID {
-						found = i
-						break
+						if found == -1 {
+							// Create new content tab
+							content := fmt.Sprintf("Resource Details\n%s\n\nName: %s\nType: %s\nLocation: %s\nResource Group: %s\nID: %s\n\nActions:\n• Press 'a' for AI analysis\n• Press 'M' for metrics\n• Press 'E' to edit\n• Press 'T' for Terraform\n• Press 'B' for Bicep",
+								strings.Repeat("=", 50), resourceData.Name, resourceData.Type, resourceData.Location, m.selectedGroup, resourceData.ID)
+
+							tab := tui.Tab{
+								Title:    resourceData.Name,
+								Content:  content,
+								Type:     resourceData.Type,
+								Meta:     map[string]string{"id": resourceData.ID, "type": resourceData.Type, "resourceGroup": m.selectedGroup},
+								Closable: true,
+							}
+							m.contentTabs = append(m.contentTabs, tab)
+							m.activeContentTab = len(m.contentTabs) - 1 // switch to new tab
+						} else {
+							m.activeContentTab = found // switch to existing tab
+						}
+						return m, nil
 					}
 				}
-
-				if found == -1 {
-					// Create new content tab
-					content := fmt.Sprintf("Resource Details\n%s\n\nName: %s\nType: %s\nLocation: %s\nResource Group: %s\nID: %s\n\nActions:\n• Press 'a' for AI analysis\n• Press 'M' for metrics\n• Press 'E' to edit\n• Press 'T' for Terraform\n• Press 'B' for Bicep",
-						strings.Repeat("=", 50), res.Name, res.Type, res.Location, m.selectedGroup, res.ID)
-
-					tab := tui.Tab{
-						Title:    res.Name,
-						Content:  content,
-						Type:     res.Type,
-						Meta:     map[string]string{"id": res.ID, "type": res.Type, "resourceGroup": m.selectedGroup},
-						Closable: true,
-					}
-					m.contentTabs = append(m.contentTabs, tab)
-					m.activeContentTab = len(m.contentTabs) - 1 // switch to new tab
-				} else {
-					m.activeContentTab = found // switch to existing tab
-				}
-				return m, nil
 			} else if m.activeTabIdx == 0 && len(m.resourcesInGroup) > 0 && m.resourceIdx < len(m.resourcesInGroup) {
 				// Legacy mode: open resource in traditional tab
 				res := m.resourcesInGroup[m.resourceIdx]
@@ -677,40 +706,88 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "down", "j":
-			if len(m.resourceGroups) > 0 {
-				m.resourceGroupIdx = (m.resourceGroupIdx + 1) % len(m.resourceGroups)
-				// Auto-scroll if needed
-				if m.resourceGroupIdx >= m.groupScrollOffset+m.maxVisibleGroups {
-					m.groupScrollOffset = m.resourceGroupIdx - m.maxVisibleGroups + 1
-				}
-				m.selectedGroup = m.resourceGroups[m.resourceGroupIdx].Name
-
-				// Update tree view selection if in tree mode
-				if m.showTreeView && m.treeView != nil {
-					for i, child := range m.treeView.Root.Children {
-						child.Selected = (i == m.resourceGroupIdx)
+			if m.showTreeView && m.treeView != nil {
+				// Tree view navigation: navigate through all visible nodes
+				selectedNode := m.treeView.SelectNext()
+				if selectedNode != nil {
+					// Update model state based on selection
+					if selectedNode.Type == "group" {
+						// Find the group index
+						for i, rg := range m.resourceGroups {
+							if rg.Name == selectedNode.Name {
+								m.resourceGroupIdx = i
+								m.selectedGroup = selectedNode.Name
+								// Load resources if not already loaded and group is expanded
+								if selectedNode.Expanded && len(selectedNode.Children) == 0 {
+									return m, loadResourcesInGroupCmd(m.selectedGroup)
+								}
+								break
+							}
+						}
+					} else if selectedNode.Type == "resource" {
+						// Find the resource index within the selected group
+						for i, res := range m.resourcesInGroup {
+							if res.Name == selectedNode.Name {
+								m.resourceIdx = i
+								m.selectedResource = selectedNode.Name
+								break
+							}
+						}
 					}
 				}
-
-				return m, loadResourcesInGroupCmd(m.selectedGroup)
+			} else {
+				// Legacy navigation: only resource groups
+				if len(m.resourceGroups) > 0 {
+					m.resourceGroupIdx = (m.resourceGroupIdx + 1) % len(m.resourceGroups)
+					// Auto-scroll if needed
+					if m.resourceGroupIdx >= m.groupScrollOffset+m.maxVisibleGroups {
+						m.groupScrollOffset = m.resourceGroupIdx - m.maxVisibleGroups + 1
+					}
+					m.selectedGroup = m.resourceGroups[m.resourceGroupIdx].Name
+					return m, loadResourcesInGroupCmd(m.selectedGroup)
+				}
 			}
 		case "up", "k":
-			if len(m.resourceGroups) > 0 {
-				m.resourceGroupIdx = (m.resourceGroupIdx - 1 + len(m.resourceGroups)) % len(m.resourceGroups)
-				// Auto-scroll if needed
-				if m.resourceGroupIdx < m.groupScrollOffset {
-					m.groupScrollOffset = m.resourceGroupIdx
-				}
-				m.selectedGroup = m.resourceGroups[m.resourceGroupIdx].Name
-
-				// Update tree view selection if in tree mode
-				if m.showTreeView && m.treeView != nil {
-					for i, child := range m.treeView.Root.Children {
-						child.Selected = (i == m.resourceGroupIdx)
+			if m.showTreeView && m.treeView != nil {
+				// Tree view navigation: navigate through all visible nodes
+				selectedNode := m.treeView.SelectPrevious()
+				if selectedNode != nil {
+					// Update model state based on selection
+					if selectedNode.Type == "group" {
+						// Find the group index
+						for i, rg := range m.resourceGroups {
+							if rg.Name == selectedNode.Name {
+								m.resourceGroupIdx = i
+								m.selectedGroup = selectedNode.Name
+								// Load resources if not already loaded and group is expanded
+								if selectedNode.Expanded && len(selectedNode.Children) == 0 {
+									return m, loadResourcesInGroupCmd(m.selectedGroup)
+								}
+								break
+							}
+						}
+					} else if selectedNode.Type == "resource" {
+						// Find the resource index within the selected group
+						for i, res := range m.resourcesInGroup {
+							if res.Name == selectedNode.Name {
+								m.resourceIdx = i
+								m.selectedResource = selectedNode.Name
+								break
+							}
+						}
 					}
 				}
-
-				return m, loadResourcesInGroupCmd(m.selectedGroup)
+			} else {
+				// Legacy navigation: only resource groups
+				if len(m.resourceGroups) > 0 {
+					m.resourceGroupIdx = (m.resourceGroupIdx - 1 + len(m.resourceGroups)) % len(m.resourceGroups)
+					// Auto-scroll if needed
+					if m.resourceGroupIdx < m.groupScrollOffset {
+						m.groupScrollOffset = m.resourceGroupIdx
+					}
+					m.selectedGroup = m.resourceGroups[m.resourceGroupIdx].Name
+					return m, loadResourcesInGroupCmd(m.selectedGroup)
+				}
 			}
 		case "right":
 			if len(m.resourcesInGroup) > 0 {
@@ -732,12 +809,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case " ", "space":
 			// Expand/collapse tree nodes (vim-like space functionality)
-			if m.showTreeView && len(m.resourceGroups) > 0 && m.resourceGroupIdx < len(m.resourceGroups) {
-				// Find the corresponding tree node and toggle expansion
-				for _, child := range m.treeView.Root.Children {
-					if child.Name == m.selectedGroup {
-						child.Expanded = !child.Expanded
-						break
+			if m.showTreeView && m.treeView != nil {
+				selectedNode, expanded := m.treeView.ToggleExpansion()
+				if selectedNode != nil {
+					// If expanding a group that has no resources loaded, load them
+					if expanded && selectedNode.Type == "group" && len(selectedNode.Children) == 0 {
+						// Update model state to reflect the selected group
+						for i, rg := range m.resourceGroups {
+							if rg.Name == selectedNode.Name {
+								m.resourceGroupIdx = i
+								m.selectedGroup = selectedNode.Name
+								break
+							}
+						}
+						// Load resources for this group
+						return m, loadResourcesInGroupCmd(selectedNode.Name)
 					}
 				}
 			}
@@ -905,14 +991,14 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "a":
 			// Show AI analysis for selected resource
-			if m.activeTabIdx == 0 && len(m.resourcesInGroup) > 0 && m.resourceIdx < len(m.resourcesInGroup) {
-				res := m.resourcesInGroup[m.resourceIdx]
+			selectedResource := m.getSelectedResource()
+			if selectedResource != nil {
 				if m.aiProvider != nil {
 					m.aiLoading = true
 					m.showAIPopup = true
 					go func() {
-						details, _ := fetchResourceDetails(res.ID)
-						analysis, err := m.aiProvider.DescribeResource(res.Type, res.Name, details)
+						details, _ := fetchResourceDetails(selectedResource.ID)
+						analysis, err := m.aiProvider.DescribeResource(selectedResource.Type, selectedResource.Name, details)
 						if err != nil {
 							m.aiMessage = "AI analysis failed: " + err.Error()
 						} else {
@@ -928,11 +1014,11 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		case "M":
 			// Show metrics dashboard for selected resource
-			if m.activeTabIdx == 0 && len(m.resourcesInGroup) > 0 && m.resourceIdx < len(m.resourcesInGroup) {
-				res := m.resourcesInGroup[m.resourceIdx]
+			selectedResource := m.getSelectedResource()
+			if selectedResource != nil {
 				m.showMetricsDialog = true
-				m.editingResourceName = res.Name
-				m.editingResourceType = res.Type
+				m.editingResourceName = selectedResource.Name
+				m.editingResourceType = selectedResource.Type
 				// Generate demo metrics data
 				m.resourceMetrics = map[string]interface{}{
 					"cpu_usage":    75.5,
@@ -1089,6 +1175,9 @@ func (m *model) View() string {
 
 	// Update status bar with current subscription and tenant information
 	if m.statusBar != nil {
+		// Update status bar width
+		m.statusBar.Width = m.termWidth
+
 		// Clear existing segments
 		m.statusBar.Segments = []tui.PowerlineSegment{}
 		m.statusBar.RightAlign = []tui.PowerlineSegment{}
@@ -1127,11 +1216,11 @@ func (m *model) View() string {
 
 	if m.showTreeView && m.treeView != nil {
 		// Tree view + content tabs layout (NeoVim-style)
-		leftPanelHeight := m.termHeight - 3 // Account for status bar
+		leftPanelHeight := 20 // Fixed reasonable height
 		treeViewContent := m.treeView.RenderTreeView(m.leftPanelWidth, leftPanelHeight)
 
 		// Right panel for content tabs
-		rightPanelWidth := m.termWidth - m.leftPanelWidth - 2
+		rightPanelWidth := 60 // Fixed reasonable width
 		if rightPanelWidth < 20 {
 			rightPanelWidth = 20
 		}
@@ -1199,6 +1288,11 @@ func (m *model) View() string {
 	var statusBarContent string
 	if m.statusBar != nil {
 		statusBarContent = m.statusBar.RenderStatusBar()
+	}
+
+	// Ensure status bar has content even if empty
+	if statusBarContent == "" {
+		statusBarContent = "🚀 Azure TUI | ☁️ Loading..."
 	}
 
 	// Combine main content with status bar (status bar at top)
@@ -1480,7 +1574,6 @@ func renderMainBoxLipgloss(content string, termWidth, termHeight int) string {
 
 	boxStyle := lipgloss.NewStyle().
 		Width(width).
-		Height(height).
 		Border(lipgloss.DoubleBorder()).
 		BorderForeground(lipgloss.Color("63")).
 		Align(lipgloss.Left, lipgloss.Top).

@@ -89,7 +89,7 @@ All documentation and project files have been successfully updated to reflect th
 
 ### Core Components
 - **TUI Layer**: Bubble Tea framework with lipgloss styling
-- **AI Services**: OpenAI client with MCP server support  
+- **AI Services**: OpenAI client support  
 - **Azure Integration**: SDK + CLI hybrid approach
 - **Configuration**: YAML-based user preferences
 - **Icon System**: Comprehensive Azure service icon mapping

@@ -35,7 +35,6 @@ Welcome to the azure-tui project! Please read and follow these instructions and 
 
 ### AI/Copilot
 - **All AI features must use the OpenAI provider abstraction.**
-- **Default to using the Azure MCP server if available.**
 - **Summarize, explain, and recommend actions for all resource types.**
 - **Never expose sensitive data in AI prompts or completions.**
 - **Document all AI prompt templates and logic.**

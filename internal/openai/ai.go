@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/http"
-	"os"
 	"strings"
 
 	openai "github.com/sashabaranov/go-openai"
@@ -15,13 +14,7 @@ type AIProvider struct {
 }
 
 func NewAIProvider(apiKey string) *AIProvider {
-	// Check for MCP server endpoint in environment or use default
-	mcpEndpoint := os.Getenv("AZURE_MCP_ENDPOINT")
-	if mcpEndpoint == "" {
-		mcpEndpoint = "http://localhost:5030/v1" // Default MCP server endpoint
-	}
 	config := openai.DefaultConfig(apiKey)
-	config.BaseURL = mcpEndpoint
 	config.HTTPClient = &http.Client{}
 	return &AIProvider{Client: openai.NewClientWithConfig(config)}
 }

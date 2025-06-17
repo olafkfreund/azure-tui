@@ -106,7 +106,6 @@ export AZURE_TENANT_ID="your-tenant-id"
 
 # AI Integration
 export OPENAI_API_KEY="your-openai-api-key"
-export AZURE_MCP_ENDPOINT="http://localhost:5030/v1"  # optional
 
 # Application Settings
 export DEMO_MODE="true"  # Run without Azure credentials

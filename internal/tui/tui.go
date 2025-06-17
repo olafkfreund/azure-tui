@@ -160,6 +160,144 @@ func GetResourceIcon(resourceType string) string {
 	return "📦"
 }
 
+// GetAllVisibleNodes returns all currently visible nodes in order for navigation
+func (tv *TreeView) GetAllVisibleNodes() []*TreeNode {
+	var nodes []*TreeNode
+	tv.collectVisibleNodes(tv.Root, &nodes)
+	return nodes
+}
+
+// collectVisibleNodes recursively collects all visible nodes
+func (tv *TreeView) collectVisibleNodes(node *TreeNode, nodes *[]*TreeNode) {
+	if node.Type == "root" {
+		for _, child := range node.Children {
+			tv.collectVisibleNodes(child, nodes)
+		}
+		return
+	}
+
+	*nodes = append(*nodes, node)
+
+	// Include children only if expanded
+	if node.Expanded {
+		for _, child := range node.Children {
+			tv.collectVisibleNodes(child, nodes)
+		}
+	}
+}
+
+// GetSelectedNode returns the currently selected node
+func (tv *TreeView) GetSelectedNode() *TreeNode {
+	return tv.findSelectedNode(tv.Root)
+}
+
+// findSelectedNode recursively finds the selected node
+func (tv *TreeView) findSelectedNode(node *TreeNode) *TreeNode {
+	if node.Selected {
+		return node
+	}
+	for _, child := range node.Children {
+		if result := tv.findSelectedNode(child); result != nil {
+			return result
+		}
+	}
+	return nil
+}
+
+// SelectNext moves selection to the next visible node
+func (tv *TreeView) SelectNext() *TreeNode {
+	visibleNodes := tv.GetAllVisibleNodes()
+	if len(visibleNodes) == 0 {
+		return nil
+	}
+
+	// Find current selection
+	currentIndex := -1
+	for i, node := range visibleNodes {
+		if node.Selected {
+			currentIndex = i
+			break
+		}
+	}
+
+	// Clear current selection
+	tv.clearAllSelections(tv.Root)
+
+	// Select next node (wrap around)
+	nextIndex := (currentIndex + 1) % len(visibleNodes)
+	visibleNodes[nextIndex].Selected = true
+
+	// Update scroll if needed
+	if nextIndex >= tv.ScrollOffset+tv.MaxVisible {
+		tv.ScrollOffset = nextIndex - tv.MaxVisible + 1
+	}
+
+	return visibleNodes[nextIndex]
+}
+
+// SelectPrevious moves selection to the previous visible node
+func (tv *TreeView) SelectPrevious() *TreeNode {
+	visibleNodes := tv.GetAllVisibleNodes()
+	if len(visibleNodes) == 0 {
+		return nil
+	}
+
+	// Find current selection
+	currentIndex := -1
+	for i, node := range visibleNodes {
+		if node.Selected {
+			currentIndex = i
+			break
+		}
+	}
+
+	// Clear current selection
+	tv.clearAllSelections(tv.Root)
+
+	// Select previous node (wrap around)
+	prevIndex := (currentIndex - 1 + len(visibleNodes)) % len(visibleNodes)
+	visibleNodes[prevIndex].Selected = true
+
+	// Update scroll if needed
+	if prevIndex < tv.ScrollOffset {
+		tv.ScrollOffset = prevIndex
+	}
+
+	return visibleNodes[prevIndex]
+}
+
+// clearAllSelections recursively clears all selections
+func (tv *TreeView) clearAllSelections(node *TreeNode) {
+	node.Selected = false
+	for _, child := range node.Children {
+		tv.clearAllSelections(child)
+	}
+}
+
+// ToggleExpansion toggles the expansion of the currently selected node
+func (tv *TreeView) ToggleExpansion() (*TreeNode, bool) {
+	selectedNode := tv.GetSelectedNode()
+	if selectedNode == nil || selectedNode.Type != "group" {
+		return nil, false
+	}
+
+	selectedNode.Expanded = !selectedNode.Expanded
+	return selectedNode, selectedNode.Expanded
+}
+
+// EnsureSelection ensures at least one node is selected
+func (tv *TreeView) EnsureSelection() {
+	if tv.GetSelectedNode() != nil {
+		return
+	}
+
+	// Select first visible node
+	visibleNodes := tv.GetAllVisibleNodes()
+	if len(visibleNodes) > 0 {
+		visibleNodes[0].Selected = true
+	}
+}
+
 // RenderTreeView renders the tree view as a string
 func (tv *TreeView) RenderTreeView(width, height int) string {
 	style := lipgloss.NewStyle().
@@ -205,6 +343,12 @@ func (tv *TreeView) RenderTreeView(width, height int) string {
 	}
 
 	content := strings.Join(visibleLines, "\n")
+
+	// Ensure we always have some content
+	if content == "" {
+		content = "☁️ Azure Resources\n\n🔄 Loading resource groups...\n\nPress ? for help"
+	}
+
 	return style.Render(content)
 }
 
@@ -304,6 +448,10 @@ func (sb *StatusBar) AddRightSegment(text string, bg, fg lipgloss.Color) {
 
 // RenderStatusBar renders the powerline status bar
 func (sb *StatusBar) RenderStatusBar() string {
+	if len(sb.Segments) == 0 {
+		return "🚀 Azure TUI | Loading..."
+	}
+
 	var leftSide strings.Builder
 	var rightSide strings.Builder
 
@@ -316,14 +464,9 @@ func (sb *StatusBar) RenderStatusBar() string {
 
 		leftSide.WriteString(style.Render(segment.Text))
 
-		// Add powerline separator
+		// Add powerline separator (simplified)
 		if i < len(sb.Segments)-1 {
-			nextBg := sb.Segments[i+1].Background
-			separator := lipgloss.NewStyle().
-				Background(nextBg).
-				Foreground(segment.Background).
-				Render("")
-			leftSide.WriteString(separator)
+			leftSide.WriteString(" ")
 		}
 	}
 
@@ -335,17 +478,12 @@ func (sb *StatusBar) RenderStatusBar() string {
 			Foreground(segment.Foreground).
 			Padding(0, 1)
 
-		// Add powerline separator before segment
-		if i < len(sb.RightAlign)-1 {
-			prevBg := sb.RightAlign[i+1].Background
-			separator := lipgloss.NewStyle().
-				Background(segment.Background).
-				Foreground(prevBg).
-				Render("")
-			rightSide.WriteString(separator)
-		}
-
 		rightSide.WriteString(style.Render(segment.Text))
+
+		// Add separator between segments
+		if i > 0 {
+			rightSide.WriteString(" ")
+		}
 	}
 
 	// Combine left and right with spacing
