@@ -1,0 +1,131 @@
+# Binaries for programs and plugins
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+azure-tui
+main
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+# Go workspace file
+go.work
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp
+.tmp/
+temp/
+
+# Log files
+*.log
+logs/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Azure CLI cache
+.azure/
+
+# SSH keys and certificates
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+known_hosts
+
+# Configuration files with sensitive data
+config.json
+config.yaml
+config.yml
+secrets.json
+secrets.yaml
+secrets.yml
+
+# Build artifacts
+dist/
+build/
+target/
+
+# Coverage reports
+coverage.txt
+coverage.html
+*.cover
+
+# Profiling files
+*.prof
+*.cpu
+*.mem
+
+# Nix
+result
+result-*
+
+# Backup files
+*.backup
+*.bak
+*.backup*
+
+# Demo output and test files
+demo_output/
+test_output/
+*.demo
+
+# Container and Docker files
+.dockerignore
+docker-compose.override.yml
+
+# Terraform and other IaC state files
+*.tfstate
+*.tfstate.*
+.terraform/
+.terraform.lock.hcl
+
+# Bicep compiled files
+*.json.bicep
+
+# Azure Resource Manager template parameters
+azuredeploy.parameters.json
+azuredeploy.parameters.*.json
+
+# Local development files
+local/
+dev/
+debug/
+
+# Integration test artifacts
+integration_test_results/
+performance_test_results/
+
+# Cache directories
+.cache/
+node_modules/

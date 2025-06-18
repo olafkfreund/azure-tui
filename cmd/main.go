@@ -119,6 +119,7 @@ type model struct {
 	loadingState           string
 	selectedPanel          int
 	rightPanelScrollOffset int
+	leftPanelScrollOffset  int // Add independent scrolling for left panel
 	rightPanelMaxLines     int
 	actionInProgress       bool
 	lastActionResult       *resourceactions.ActionResult
@@ -139,6 +140,9 @@ type model struct {
 	// Container Instance-specific content
 	containerInstanceDetailsContent string
 	containerInstanceLogsContent    string
+
+	// Help popup state
+	showHelpPopup bool
 }
 
 func fetchSubscriptions() ([]Subscription, error) {
@@ -582,12 +586,14 @@ func initModel() model {
 		loadingState:           "loading",
 		selectedPanel:          0,
 		rightPanelScrollOffset: 0,
+		leftPanelScrollOffset:  0, // Initialize left panel scroll offset
 		rightPanelMaxLines:     50,
 		showDashboard:          false,
 		logEntries:             []string{},
 		activeView:             "welcome",
 		propertyExpandedIndex:  -1,
 		expandedProperties:     make(map[string]bool),
+		showHelpPopup:          false,
 	}
 }
 
@@ -718,12 +724,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Left navigation - switch to tree panel or previous section
 			if m.selectedPanel == 1 {
 				m.selectedPanel = 0
-				m.rightPanelScrollOffset = 0 // Reset scroll when switching
+				// Don't reset scroll when switching to maintain position
 			}
 		case "right", "l":
 			// Right navigation - switch to details panel
 			if m.selectedPanel == 0 {
 				m.selectedPanel = 1
+				// Don't reset scroll when switching to maintain position
 			}
 		case "d":
 			// Toggle dashboard view
@@ -739,6 +746,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "j", "down":
 			if m.selectedPanel == 0 && m.treeView != nil {
+				// Try to navigate first
 				m.treeView.SelectNext()
 				m.treeView.EnsureSelection()
 				if selectedNode := m.treeView.GetSelectedNode(); selectedNode != nil && selectedNode.Type == "resource" {
@@ -748,7 +756,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			} else if m.selectedPanel == 1 {
 				// Right panel scrolling down
-				// Calculate max lines based on current content
 				rightContent := m.renderResourcePanel(m.width/3, m.height-2)
 				totalLines := strings.Count(rightContent, "\n")
 				maxLines := max(0, totalLines-(m.height-6))
@@ -758,12 +765,45 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "k", "up":
 			if m.selectedPanel == 0 && m.treeView != nil {
+				// Navigate normally
 				m.treeView.SelectPrevious()
 				m.treeView.EnsureSelection()
 				if selectedNode := m.treeView.GetSelectedNode(); selectedNode != nil && selectedNode.Type == "resource" {
 					if resource, ok := selectedNode.ResourceData.(AzureResource); ok {
 						return m, loadResourceDetailsCmd(resource)
 					}
+				}
+			} else if m.selectedPanel == 1 {
+				// Right panel scrolling up
+				if m.rightPanelScrollOffset > 0 {
+					m.rightPanelScrollOffset--
+				}
+			}
+		case "ctrl+j", "ctrl+down":
+			// Dedicated scrolling down for current panel
+			if m.selectedPanel == 0 && m.treeView != nil {
+				// Left panel scrolling
+				treeContent := m.treeView.RenderTreeView(m.width/3-4, m.height-2)
+				totalLines := strings.Count(treeContent, "\n")
+				maxLines := max(0, totalLines-(m.height-6))
+				if m.leftPanelScrollOffset < maxLines {
+					m.leftPanelScrollOffset++
+				}
+			} else if m.selectedPanel == 1 {
+				// Right panel scrolling
+				rightContent := m.renderResourcePanel(m.width/3, m.height-2)
+				totalLines := strings.Count(rightContent, "\n")
+				maxLines := max(0, totalLines-(m.height-6))
+				if m.rightPanelScrollOffset < maxLines {
+					m.rightPanelScrollOffset++
+				}
+			}
+		case "ctrl+k", "ctrl+up":
+			// Dedicated scrolling up for current panel
+			if m.selectedPanel == 0 {
+				// Left panel scrolling up
+				if m.leftPanelScrollOffset > 0 {
+					m.leftPanelScrollOffset--
 				}
 			} else if m.selectedPanel == 1 {
 				// Right panel scrolling up
@@ -943,6 +983,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "R":
 			return m, loadDataCmd()
+		case "?":
+			// Toggle help popup
+			m.showHelpPopup = !m.showHelpPopup
+		case "escape":
+			// Close help popup if open
+			if m.showHelpPopup {
+				m.showHelpPopup = false
+			}
 		}
 	}
 	return m, nil
@@ -985,7 +1033,11 @@ func (m model) View() string {
 			}
 			navigationHelp = "h/←:Tree l/→:Stay"
 		} else {
-			panelHelp = " (j/k:navigate)"
+			if m.leftPanelScrollOffset > 0 {
+				panelHelp = " (j/k:scroll)"
+			} else {
+				panelHelp = " (j/k:navigate/scroll)"
+			}
 			navigationHelp = "l/→:Details"
 		}
 		m.statusBar.AddSegment(fmt.Sprintf("▶ %s%s", panelName, panelHelp), colorAqua, bgMedium)
@@ -996,22 +1048,37 @@ func (m model) View() string {
 			m.statusBar.AddSegment("e:Expand AKS Properties", colorYellow, bgMedium)
 		}
 
-		m.statusBar.AddSegment("Tab:Switch d:Dashboard s:Start S:Stop r:Restart R:Refresh q:Quit", colorGray, bgLight)
+		m.statusBar.AddSegment("Tab:Switch d:Dashboard s:Start S:Stop r:Restart R:Refresh ?:Help q:Quit", colorGray, bgLight)
 	}
 
-	// Two-panel layout - Enhanced with active panel indicators
+	// Two-panel layout - Fixed width constraints to prevent layout breaking
 	leftWidth := m.width / 3
 	rightWidth := m.width - leftWidth
 
-	// Tree panel
-	treeContent := ""
-	if m.treeView != nil {
-		treeContent = m.treeView.RenderTreeView(leftWidth-4, m.height-2)
+	// Ensure minimum widths to prevent layout collapse
+	if leftWidth < 20 {
+		leftWidth = 20
+	}
+	if rightWidth < 30 {
+		rightWidth = 30
 	}
 
-	// Style left panel with active indicator
+	// Tree panel with strict width enforcement
+	treeContent := ""
+	if m.treeView != nil {
+		treeContentRaw := m.treeView.RenderTreeView(leftWidth-4, m.height-2)
+		// Apply scrolling to left panel if it has long content
+		if m.selectedPanel == 0 {
+			treeContent = m.renderScrollableContentWithOffset(treeContentRaw, m.height-6, m.leftPanelScrollOffset)
+		} else {
+			treeContent = treeContentRaw
+		}
+	}
+
+	// Style left panel with STRICT width constraints
 	leftPanelStyle := lipgloss.NewStyle().
 		Width(leftWidth).
+		MaxWidth(leftWidth). // Enforce maximum width
 		Foreground(fgMedium).
 		Padding(1, 2)
 
@@ -1026,20 +1093,25 @@ func (m model) View() string {
 
 	leftPanel := leftPanelStyle.Render(treeContent)
 
-	// Details panel with scrolling support
+	// Details panel with scrolling support and STRICT width constraints
 	rightContentRaw := m.renderResourcePanel(rightWidth-4, m.height-2)
+
+	// Ensure content is properly wrapped to prevent layout breaking
+	rightContentWrapped := ensureContentWidth(rightContentRaw, rightWidth-8)
+
 	var rightContent string
 
 	// Apply scrolling if right panel is active
 	if m.selectedPanel == 1 {
-		rightContent = m.renderScrollableContent(rightContentRaw, m.height-6)
+		rightContent = m.renderScrollableContent(rightContentWrapped, m.height-6)
 	} else {
-		rightContent = rightContentRaw
+		rightContent = rightContentWrapped
 	}
 
-	// Style right panel with active indicator
+	// Style right panel with STRICT width constraints
 	rightPanelStyle := lipgloss.NewStyle().
 		Width(rightWidth).
+		MaxWidth(rightWidth). // Enforce maximum width
 		Foreground(fgMedium).
 		Padding(1, 2)
 
@@ -1061,6 +1133,82 @@ func (m model) View() string {
 
 	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
 	fullView := lipgloss.JoinVertical(lipgloss.Left, statusBarContent, mainContent)
+
+	// Render help popup if active
+	if m.showHelpPopup {
+		// Create a comprehensive help content
+		var helpContent strings.Builder
+		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render("⌨️  Azure TUI - Keyboard Shortcuts"))
+		helpContent.WriteString("\n\n")
+
+		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("🧭 Navigation:"))
+		helpContent.WriteString("\n")
+		helpContent.WriteString("j/k ↑/↓    Navigate up/down in tree\n")
+		helpContent.WriteString("h/l ←/→    Switch between panels\n")
+		helpContent.WriteString("Space      Expand/collapse resource groups\n")
+		helpContent.WriteString("Enter      Open resource in details panel\n")
+		helpContent.WriteString("Tab        Switch between panels\n")
+		helpContent.WriteString("e          Expand/collapse complex properties\n")
+		helpContent.WriteString("Ctrl+j/k   Scroll up/down in current panel\n\n")
+
+		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorAqua).Render("⚡ Resource Actions:"))
+		helpContent.WriteString("\n")
+		helpContent.WriteString("s          Start resource (VMs, Containers)\n")
+		helpContent.WriteString("S          Stop resource (VMs, Containers)\n")
+		helpContent.WriteString("r          Restart resource (VMs, Containers)\n")
+		helpContent.WriteString("d          Toggle dashboard view\n")
+		helpContent.WriteString("R          Refresh all data\n\n")
+
+		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render("🌐 Network Management:"))
+		helpContent.WriteString("\n")
+		helpContent.WriteString("N          Network Dashboard\n")
+		helpContent.WriteString("V          VNet Details (for VNets)\n")
+		helpContent.WriteString("G          NSG Details (for NSGs)\n")
+		helpContent.WriteString("Z          Network Topology\n")
+		helpContent.WriteString("A          AI Network Analysis\n")
+		helpContent.WriteString("C          Create VNet\n")
+		helpContent.WriteString("Ctrl+N     Create NSG\n\n")
+
+		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorPurple).Render("🐳 Container Management:"))
+		helpContent.WriteString("\n")
+		helpContent.WriteString("L          Get Container Logs\n")
+		helpContent.WriteString("E          Exec into Container\n")
+		helpContent.WriteString("a          Attach to Container\n")
+		helpContent.WriteString("u          Scale Container Resources\n")
+		helpContent.WriteString("I          Container Instance Details\n\n")
+
+		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorYellow).Render("🔐 SSH & AKS:"))
+		helpContent.WriteString("\n")
+		helpContent.WriteString("c          SSH Connect (VMs)\n")
+		helpContent.WriteString("b          Bastion Connect (VMs)\n")
+		helpContent.WriteString("p          List Pods (AKS)\n")
+		helpContent.WriteString("D          List Deployments (AKS)\n")
+		helpContent.WriteString("n          List Nodes (AKS)\n")
+		helpContent.WriteString("v          List Services (AKS)\n\n")
+
+		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGray).Render("🎮 Interface:"))
+		helpContent.WriteString("\n")
+		helpContent.WriteString("?          Show/hide this help\n")
+		helpContent.WriteString("Esc        Close dialogs/popups\n")
+		helpContent.WriteString("q          Quit application\n\n")
+
+		helpContent.WriteString(lipgloss.NewStyle().Italic(true).Foreground(colorGray).Render("Press '?' or 'Esc' to close this help"))
+
+		// Create popup style
+		popupStyle := lipgloss.NewStyle().
+			Background(bgMedium).
+			Foreground(fgLight).
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(colorBlue).
+			Padding(1, 2).
+			Width(70).
+			Align(lipgloss.Center, lipgloss.Top)
+
+		styledPopup := popupStyle.Render(helpContent.String())
+
+		// Create a simple centered layout
+		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, styledPopup)
+	}
 
 	return lipgloss.NewStyle().Background(bgDark).Render(fullView)
 }
@@ -1111,56 +1259,18 @@ func (m model) renderWelcomePanel(width, height int) string {
 	content.WriteString("1. Navigate through resource groups in the left panel\n")
 	content.WriteString("2. Press Space/Enter to expand a resource group\n")
 	content.WriteString("3. Select a resource to view details and actions\n")
-	content.WriteString("4. Use Tab to switch between panels\n\n")
+	content.WriteString("4. Use Tab to switch between panels\n")
+	content.WriteString("5. Press '?' for complete keyboard shortcuts\n\n")
 
-	content.WriteString(sectionStyle.Render("🎮 Quick Actions:"))
-	content.WriteString("\n")
-	actionStyle := lipgloss.NewStyle().Foreground(colorAqua)
-	content.WriteString(fmt.Sprintf("%s - Start resource (VMs)\n", actionStyle.Render("s")))
-	content.WriteString(fmt.Sprintf("%s - Stop resource (VMs)\n", actionStyle.Render("S")))
-	content.WriteString(fmt.Sprintf("%s - Restart resource (VMs)\n", actionStyle.Render("r")))
-	content.WriteString(fmt.Sprintf("%s - Toggle Dashboard view\n", actionStyle.Render("d")))
-	content.WriteString(fmt.Sprintf("%s - Refresh all data\n", actionStyle.Render("R")))
-	content.WriteString(fmt.Sprintf("%s - Switch panels\n", actionStyle.Render("Tab")))
-	content.WriteString(fmt.Sprintf("%s - Quit\n\n", actionStyle.Render("q")))
-
-	content.WriteString(sectionStyle.Render("🌐 Network Management:"))
-	content.WriteString("\n")
-	networkStyle := lipgloss.NewStyle().Foreground(colorBlue)
-	content.WriteString(fmt.Sprintf("%s - Network Dashboard\n", networkStyle.Render("N")))
-	content.WriteString(fmt.Sprintf("%s - VNet Details (for VNets)\n", networkStyle.Render("V")))
-	content.WriteString(fmt.Sprintf("%s - NSG Details (for NSGs)\n", networkStyle.Render("G")))
-	content.WriteString(fmt.Sprintf("%s - Network Topology\n", networkStyle.Render("Z")))
-	content.WriteString(fmt.Sprintf("%s - AI Network Analysis\n", networkStyle.Render("A")))
-	content.WriteString(fmt.Sprintf("%s - Create VNet\n", networkStyle.Render("C")))
-	content.WriteString(fmt.Sprintf("%s - Create NSG\n", networkStyle.Render("Ctrl+N")))
-	content.WriteString(fmt.Sprintf("%s - Create Subnet\n", networkStyle.Render("Ctrl+S")))
-	content.WriteString(fmt.Sprintf("%s - Create Public IP\n", networkStyle.Render("Ctrl+P")))
-	content.WriteString(fmt.Sprintf("%s - Create Load Balancer\n\n", networkStyle.Render("Ctrl+L")))
-
-	content.WriteString(sectionStyle.Render("🐳 Container Instance Management:"))
-	content.WriteString("\n")
-	containerStyle := lipgloss.NewStyle().Foreground(colorPurple)
-	content.WriteString(fmt.Sprintf("%s - Start Container Instance\n", containerStyle.Render("s")))
-	content.WriteString(fmt.Sprintf("%s - Stop Container Instance\n", containerStyle.Render("S")))
-	content.WriteString(fmt.Sprintf("%s - Restart Container Instance\n", containerStyle.Render("r")))
-	content.WriteString(fmt.Sprintf("%s - Get Container Logs\n", containerStyle.Render("L")))
-	content.WriteString(fmt.Sprintf("%s - Exec into Container\n", containerStyle.Render("E")))
-	content.WriteString(fmt.Sprintf("%s - Attach to Container\n", containerStyle.Render("a")))
-	content.WriteString(fmt.Sprintf("%s - Scale Container Resources\n", containerStyle.Render("u")))
-	content.WriteString(fmt.Sprintf("%s - Container Instance Details\n\n", containerStyle.Render("I")))
-
-	content.WriteString(sectionStyle.Render("✨ New Features:"))
+	content.WriteString(sectionStyle.Render("✨ Key Features:"))
 	content.WriteString("\n")
 	featureStyle := lipgloss.NewStyle().Foreground(colorPurple)
-	content.WriteString(fmt.Sprintf("%s Enhanced resource details with better formatting\n", featureStyle.Render("•")))
-	content.WriteString(fmt.Sprintf("%s AI-powered resource descriptions and insights\n", featureStyle.Render("•")))
-	content.WriteString(fmt.Sprintf("%s Dashboard view with live metrics and trends\n", featureStyle.Render("•")))
-	content.WriteString(fmt.Sprintf("%s Comprehensive network resource management\n", featureStyle.Render("•")))
+	content.WriteString(fmt.Sprintf("%s Enhanced resource management with comprehensive actions\n", featureStyle.Render("•")))
 	content.WriteString(fmt.Sprintf("%s Network topology visualization and analysis\n", featureStyle.Render("•")))
-	content.WriteString(fmt.Sprintf("%s Terraform/Bicep code generation for networks\n", featureStyle.Render("•")))
-	content.WriteString(fmt.Sprintf("%s AI-parsed log analysis and recommendations\n", featureStyle.Render("•")))
-	content.WriteString(fmt.Sprintf("%s Transparent backgrounds for cleaner interface\n\n", featureStyle.Render("•")))
+	content.WriteString(fmt.Sprintf("%s Container instance lifecycle management\n", featureStyle.Render("•")))
+	content.WriteString(fmt.Sprintf("%s SSH and Bastion connectivity for VMs\n", featureStyle.Render("•")))
+	content.WriteString(fmt.Sprintf("%s AI-powered resource insights and analysis\n", featureStyle.Render("•")))
+	content.WriteString(fmt.Sprintf("%s Terraform/Bicep code generation\n\n", featureStyle.Render("•")))
 
 	aiStatus := "❌ Disabled (set OPENAI_API_KEY)"
 	if m.aiProvider != nil {
@@ -1169,7 +1279,10 @@ func (m model) renderWelcomePanel(width, height int) string {
 	statusStyle := lipgloss.NewStyle().Foreground(colorGray)
 	content.WriteString(fmt.Sprintf("🤖 AI Features: %s\n\n", statusStyle.Render(aiStatus)))
 
-	content.WriteString("💡 Select a resource from the left panel to see detailed information and available actions here.")
+	helpStyle := lipgloss.NewStyle().Foreground(colorYellow).Bold(true)
+	content.WriteString(fmt.Sprintf("💡 Press %s for complete keyboard shortcuts and help\n\n", helpStyle.Render("?")))
+
+	content.WriteString("Select a resource from the left panel to see detailed information and available actions.")
 
 	return content.String()
 }
@@ -1218,39 +1331,10 @@ func (m model) renderEnhancedResourceDetails(width, height int) string {
 		content.WriteString("\n")
 
 		aiStyle := lipgloss.NewStyle().Foreground(colorPurple).Italic(true)
-		// Wrap long AI descriptions
-		lines := strings.Split(m.aiDescription, "\n")
-		for _, line := range lines {
-			if len(line) > width-10 {
-				words := strings.Fields(line)
-				currentLine := ""
-				for _, word := range words {
-					if len(currentLine+" "+word) > width-10 {
-						if currentLine != "" {
-							content.WriteString(aiStyle.Render(currentLine))
-							content.WriteString("\n")
-							currentLine = word
-						} else {
-							content.WriteString(aiStyle.Render(word))
-							content.WriteString("\n")
-						}
-					} else {
-						if currentLine == "" {
-							currentLine = word
-						} else {
-							currentLine += " " + word
-						}
-					}
-				}
-				if currentLine != "" {
-					content.WriteString(aiStyle.Render(currentLine))
-					content.WriteString("\n")
-				}
-			} else {
-				content.WriteString(aiStyle.Render(line))
-				content.WriteString("\n")
-			}
-		}
+		// Wrap AI description to fit panel width
+		wrappedAIText := wrapText(m.aiDescription, width-10)
+		content.WriteString(aiStyle.Render(wrappedAIText))
+		content.WriteString("\n")
 	}
 
 	// Tags Section
@@ -1509,6 +1593,79 @@ func (m model) renderDashboardView(width, height int) string {
 }
 
 // Helper functions for better formatting
+
+// wrapText wraps text to fit within a specified width
+func wrapText(text string, width int) string {
+	if width <= 0 {
+		return text
+	}
+
+	var result strings.Builder
+	lines := strings.Split(text, "\n")
+
+	for _, line := range lines {
+		if len(line) <= width {
+			result.WriteString(line)
+			result.WriteString("\n")
+			continue
+		}
+
+		words := strings.Fields(line)
+		currentLine := ""
+
+		for _, word := range words {
+			if len(currentLine+" "+word) > width {
+				if currentLine != "" {
+					result.WriteString(strings.TrimSpace(currentLine))
+					result.WriteString("\n")
+					currentLine = word
+				} else {
+					// Word is longer than width, force break
+					result.WriteString(word)
+					result.WriteString("\n")
+					currentLine = ""
+				}
+			} else {
+				if currentLine == "" {
+					currentLine = word
+				} else {
+					currentLine += " " + word
+				}
+			}
+		}
+
+		if currentLine != "" {
+			result.WriteString(strings.TrimSpace(currentLine))
+			result.WriteString("\n")
+		}
+	}
+
+	return strings.TrimSuffix(result.String(), "\n")
+}
+
+// ensureContentWidth ensures all content fits within the specified width by wrapping text
+func ensureContentWidth(content string, maxWidth int) string {
+	if maxWidth <= 0 {
+		return content
+	}
+
+	lines := strings.Split(content, "\n")
+	var result strings.Builder
+
+	for _, line := range lines {
+		// Check if line is too long
+		if len(line) > maxWidth {
+			// If it contains ANSI escape codes, preserve them
+			wrappedLine := wrapText(line, maxWidth)
+			result.WriteString(wrappedLine)
+		} else {
+			result.WriteString(line)
+		}
+		result.WriteString("\n")
+	}
+
+	return strings.TrimSuffix(result.String(), "\n")
+}
 func getResourceTypeDisplayName(resourceType string) string {
 	displayNames := map[string]string{
 		"Microsoft.Compute/virtualMachines":          "Virtual Machine",
@@ -1728,11 +1885,16 @@ func max(a, b int) int {
 
 // renderScrollableContent applies scrolling to content and adds scroll indicators
 func (m model) renderScrollableContent(content string, maxHeight int) string {
+	return m.renderScrollableContentWithOffset(content, maxHeight, m.rightPanelScrollOffset)
+}
+
+// renderScrollableContentWithOffset applies scrolling to content with a custom offset
+func (m model) renderScrollableContentWithOffset(content string, maxHeight int, scrollOffset int) string {
 	lines := strings.Split(content, "\n")
 	totalLines := len(lines)
 
 	// Calculate visible range
-	startLine := m.rightPanelScrollOffset
+	startLine := scrollOffset
 	endLine := startLine + maxHeight
 	if endLine > totalLines {
 		endLine = totalLines
@@ -1763,6 +1925,58 @@ func (m model) renderScrollableContent(content string, maxHeight int) string {
 	}
 
 	return result
+}
+
+// createShortcutsMap creates a comprehensive keyboard shortcuts map for the help popup
+func createShortcutsMap() map[string]string {
+	return map[string]string{
+		// Navigation
+		"j/k ↑/↓": "Navigate up/down in tree",
+		"h/l ←/→": "Switch between panels",
+		"Space":   "Expand/collapse resource groups",
+		"Enter":   "Open resource in details panel",
+		"Tab":     "Switch between panels",
+		"e":       "Expand/collapse complex properties",
+
+		// Resource Actions
+		"s": "Start resource (VMs, Containers)",
+		"S": "Stop resource (VMs, Containers)",
+		"r": "Restart resource (VMs, Containers)",
+		"d": "Toggle dashboard view",
+		"R": "Refresh all data",
+
+		// Network Management
+		"N":      "Network Dashboard",
+		"V":      "VNet Details (for VNets)",
+		"G":      "NSG Details (for NSGs)",
+		"Z":      "Network Topology",
+		"A":      "AI Network Analysis",
+		"C":      "Create VNet",
+		"Ctrl+N": "Create NSG",
+		"Ctrl+S": "Create Subnet",
+		"Ctrl+P": "Create Public IP",
+		"Ctrl+L": "Create Load Balancer",
+
+		// Container Instance Management
+		"L": "Get Container Logs",
+		"E": "Exec into Container",
+		"a": "Attach to Container",
+		"u": "Scale Container Resources",
+		"I": "Container Instance Details",
+
+		// SSH & AKS Management
+		"c": "SSH Connect (VMs)",
+		"b": "Bastion Connect (VMs)",
+		"p": "List Pods (AKS)",
+		"D": "List Deployments (AKS)",
+		"n": "List Nodes (AKS)",
+		"v": "List Services (AKS)",
+
+		// Interface
+		"?":   "Show/hide this help",
+		"Esc": "Close dialogs/popups",
+		"q":   "Quit application",
+	}
 }
 
 func main() {
