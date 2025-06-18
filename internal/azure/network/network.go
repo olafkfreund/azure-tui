@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/lipgloss"
 	ai "github.com/olafkfreund/azure-tui/internal/openai"
@@ -169,6 +170,7 @@ type NetworkDashboard struct {
 	Firewalls             []Firewall             `json:"firewalls"`
 	Summary               NetworkSummary         `json:"summary"`
 	Topology              NetworkTopology        `json:"topology"`
+	Errors                []string               `json:"errors,omitempty"`
 }
 
 type NetworkSummary struct {
@@ -214,40 +216,62 @@ type GatewayStatus struct {
 // GetNetworkDashboard retrieves comprehensive network information for dashboard display
 func GetNetworkDashboard(resourceGroup string) (*NetworkDashboard, error) {
 	dashboard := &NetworkDashboard{}
+	var errors []string
 
-	// Get all network resources in parallel
+	// Get all network resources and collect errors
 	vnets, err := ListVirtualNetworks()
-	if err == nil {
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("VNets: %v", err))
+		dashboard.VirtualNetworks = []VirtualNetwork{} // Empty slice, not nil
+	} else {
 		dashboard.VirtualNetworks = vnets
 	}
 
 	nsgs, err := ListNetworkSecurityGroups()
-	if err == nil {
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("NSGs: %v", err))
+		dashboard.NetworkSecurityGroups = []NetworkSecurityGroup{}
+	} else {
 		dashboard.NetworkSecurityGroups = nsgs
 	}
 
 	routeTables, err := ListRouteTables()
-	if err == nil {
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Route Tables: %v", err))
+		dashboard.RouteTables = []RouteTable{}
+	} else {
 		dashboard.RouteTables = routeTables
 	}
 
 	publicIPs, err := ListPublicIPs()
-	if err == nil {
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Public IPs: %v", err))
+		dashboard.PublicIPs = []PublicIP{}
+	} else {
 		dashboard.PublicIPs = publicIPs
 	}
 
 	nics, err := ListNetworkInterfaces()
-	if err == nil {
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Network Interfaces: %v", err))
+		dashboard.NetworkInterfaces = []NetworkInterface{}
+	} else {
 		dashboard.NetworkInterfaces = nics
 	}
 
 	lbs, err := ListLoadBalancers()
-	if err == nil {
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Load Balancers: %v", err))
+		dashboard.LoadBalancers = []LoadBalancer{}
+	} else {
 		dashboard.LoadBalancers = lbs
 	}
 
 	firewalls, err := ListFirewalls()
-	if err == nil {
+	if err != nil {
+		errors = append(errors, fmt.Sprintf("Firewalls: %v", err))
+		dashboard.Firewalls = []Firewall{}
+	} else {
 		dashboard.Firewalls = firewalls
 	}
 
@@ -256,6 +280,12 @@ func GetNetworkDashboard(resourceGroup string) (*NetworkDashboard, error) {
 
 	// Get topology information
 	dashboard.Topology = getNetworkTopology(dashboard)
+
+	// If we have errors, include them in the dashboard
+	if len(errors) > 0 {
+		dashboard.Errors = errors
+		return dashboard, fmt.Errorf("some network resources failed to load: %s", strings.Join(errors, "; "))
+	}
 
 	return dashboard, nil
 }
@@ -266,13 +296,25 @@ func GetNetworkDashboard(resourceGroup string) (*NetworkDashboard, error) {
 
 func ListVirtualNetworks() ([]VirtualNetwork, error) {
 	cmd := exec.Command("az", "network", "vnet", "list", "--output", "json")
+	// Set a reasonable timeout
+	cmd.WaitDelay = 30 * time.Second
+
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		// Return a more descriptive error
+		if exitError, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("Azure CLI error (exit code %d): %s", exitError.ExitCode(), string(exitError.Stderr))
+		}
+		return nil, fmt.Errorf("failed to execute Azure CLI command: %w", err)
 	}
+
+	if len(out) == 0 {
+		return []VirtualNetwork{}, nil // Empty result, not an error
+	}
+
 	var vnets []VirtualNetwork
 	if err := json.Unmarshal(out, &vnets); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse VNet data: %w", err)
 	}
 	return vnets, nil
 }
@@ -372,13 +414,23 @@ func DeleteSubnet(name, vnetName, resourceGroup string) error {
 
 func ListNetworkSecurityGroups() ([]NetworkSecurityGroup, error) {
 	cmd := exec.Command("az", "network", "nsg", "list", "--output", "json")
+	cmd.WaitDelay = 30 * time.Second
+
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		if exitError, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("Azure CLI error listing NSGs (exit code %d): %s", exitError.ExitCode(), string(exitError.Stderr))
+		}
+		return nil, fmt.Errorf("failed to execute Azure CLI command for NSGs: %w", err)
 	}
+
+	if len(out) == 0 {
+		return []NetworkSecurityGroup{}, nil
+	}
+
 	var nsgs []NetworkSecurityGroup
 	if err := json.Unmarshal(out, &nsgs); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse NSG data: %w", err)
 	}
 	return nsgs, nil
 }
@@ -432,13 +484,23 @@ func DeleteNetworkSecurityGroup(name, resourceGroup string) error {
 
 func ListRouteTables() ([]RouteTable, error) {
 	cmd := exec.Command("az", "network", "route-table", "list", "--output", "json")
+	cmd.WaitDelay = 30 * time.Second
+
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		if exitError, ok := err.(*exec.ExitError); ok {
+			return nil, fmt.Errorf("Azure CLI error listing route tables (exit code %d): %s", exitError.ExitCode(), string(exitError.Stderr))
+		}
+		return nil, fmt.Errorf("failed to execute Azure CLI command for route tables: %w", err)
 	}
+
+	if len(out) == 0 {
+		return []RouteTable{}, nil
+	}
+
 	var routeTables []RouteTable
 	if err := json.Unmarshal(out, &routeTables); err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to parse route table data: %w", err)
 	}
 	return routeTables, nil
 }
@@ -748,11 +810,39 @@ output vnetId string = virtualNetwork.id
 // RenderNetworkDashboard renders a comprehensive network resource dashboard
 func RenderNetworkDashboard() string {
 	dashboard, err := GetNetworkDashboard("")
-	if err != nil {
+
+	// Handle complete failures
+	if err != nil && dashboard == nil {
 		return tui.RenderPopup(tui.PopupMsg{
-			Title:   "Network Dashboard Error",
-			Content: err.Error(),
+			Title:   "Network Dashboard - Connection Error",
+			Content: fmt.Sprintf("Unable to connect to Azure:\n\n%v\n\nPlease check:\n• Azure CLI authentication (az login)\n• Internet connectivity\n• Azure subscription access", err),
 			Level:   "error",
+		})
+	}
+
+	// Check if we have any network resources at all
+	totalResources := len(dashboard.VirtualNetworks) + len(dashboard.NetworkSecurityGroups) +
+		len(dashboard.RouteTables) + len(dashboard.PublicIPs) +
+		len(dashboard.NetworkInterfaces) + len(dashboard.LoadBalancers) + len(dashboard.Firewalls)
+
+	// If no resources found, show informative message
+	if totalResources == 0 {
+		content := "No network resources found in the current subscription.\n\n"
+
+		if len(dashboard.Errors) > 0 {
+			content += "Encountered errors while loading:\n"
+			for _, errMsg := range dashboard.Errors {
+				content += fmt.Sprintf("• %s\n", errMsg)
+			}
+			content += "\nPossible causes:\n• Network connectivity issues\n• Azure CLI authentication expired\n• Insufficient permissions\n• No resources in this subscription"
+		} else {
+			content += "This subscription appears to have no network resources.\n\nTo create network resources, use:\n• 'C' to create a VNet\n• 'Ctrl+N' to create an NSG\n• Azure Portal or Azure CLI"
+		}
+
+		return tui.RenderPopup(tui.PopupMsg{
+			Title:   "Network Dashboard - No Resources",
+			Content: content,
+			Level:   "info",
 		})
 	}
 
