@@ -612,7 +612,7 @@ func validateResource(resource *EnhancedAzureResource) bool {
 	}
 
 	validHealthStatuses := []string{"Healthy", "Warning", "Critical", "Unknown"}
-	if resource.HealthStatus != "" && !containsString(validHealthStatuses, resource.HealthStatus) {
+	if resource.HealthStatus != "" && !containsStringInSlice(validHealthStatuses, resource.HealthStatus) {
 		return false
 	}
 
@@ -633,7 +633,7 @@ func containsAny(s string, substrings []string) bool {
 	return false
 }
 
-func containsString(slice []string, item string) bool {
+func containsStringInSlice(slice []string, item string) bool {
 	for _, s := range slice {
 		if s == item {
 			return true
