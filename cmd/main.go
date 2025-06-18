@@ -12,6 +12,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"github.com/olafkfreund/azure-tui/internal/azure/aci"
 	"github.com/olafkfreund/azure-tui/internal/azure/network"
 	"github.com/olafkfreund/azure-tui/internal/azure/resourceactions"
 	"github.com/olafkfreund/azure-tui/internal/azure/resourcedetails"
@@ -90,6 +91,19 @@ type networkResourceCreatedMsg struct {
 	result       resourceactions.ActionResult
 }
 
+// Container Instance message types
+type containerInstanceDetailsMsg struct{ content string }
+type containerInstanceLogsMsg struct{ content string }
+type containerInstanceActionMsg struct {
+	action string
+	result resourceactions.ActionResult
+}
+type containerInstanceScaleMsg struct {
+	cpu    float64
+	memory float64
+	result resourceactions.ActionResult
+}
+
 type model struct {
 	treeView               *tui.TreeView
 	statusBar              *tui.StatusBar
@@ -121,6 +135,10 @@ type model struct {
 	nsgDetailsContent       string
 	networkTopologyContent  string
 	networkAIContent        string
+
+	// Container Instance-specific content
+	containerInstanceDetailsContent string
+	containerInstanceLogsContent    string
 }
 
 func fetchSubscriptions() ([]Subscription, error) {
@@ -289,16 +307,37 @@ func executeResourceActionCmd(action string, resource AzureResource) tea.Cmd {
 				result = resourceactions.StartVM(resource.Name, resource.ResourceGroup)
 			} else if resource.Type == "Microsoft.ContainerService/managedClusters" {
 				result = resourceactions.StartAKSCluster(resource.Name, resource.ResourceGroup)
+			} else if resource.Type == "Microsoft.ContainerInstance/containerGroups" {
+				err := aci.StartContainerInstance(resource.Name, resource.ResourceGroup)
+				if err != nil {
+					result = resourceactions.ActionResult{Success: false, Message: fmt.Sprintf("Failed to start container instance: %v", err)}
+				} else {
+					result = resourceactions.ActionResult{Success: true, Message: fmt.Sprintf("Successfully started container instance %s", resource.Name)}
+				}
 			}
 		case "stop":
 			if resource.Type == "Microsoft.Compute/virtualMachines" {
 				result = resourceactions.StopVM(resource.Name, resource.ResourceGroup)
 			} else if resource.Type == "Microsoft.ContainerService/managedClusters" {
 				result = resourceactions.StopAKSCluster(resource.Name, resource.ResourceGroup)
+			} else if resource.Type == "Microsoft.ContainerInstance/containerGroups" {
+				err := aci.StopContainerInstance(resource.Name, resource.ResourceGroup)
+				if err != nil {
+					result = resourceactions.ActionResult{Success: false, Message: fmt.Sprintf("Failed to stop container instance: %v", err)}
+				} else {
+					result = resourceactions.ActionResult{Success: true, Message: fmt.Sprintf("Successfully stopped container instance %s", resource.Name)}
+				}
 			}
 		case "restart":
 			if resource.Type == "Microsoft.Compute/virtualMachines" {
 				result = resourceactions.RestartVM(resource.Name, resource.ResourceGroup)
+			} else if resource.Type == "Microsoft.ContainerInstance/containerGroups" {
+				err := aci.RestartContainerInstance(resource.Name, resource.ResourceGroup)
+				if err != nil {
+					result = resourceactions.ActionResult{Success: false, Message: fmt.Sprintf("Failed to restart container instance: %v", err)}
+				} else {
+					result = resourceactions.ActionResult{Success: true, Message: fmt.Sprintf("Successfully restarted container instance %s", resource.Name)}
+				}
 			}
 		case "ssh":
 			if resource.Type == "Microsoft.Compute/virtualMachines" {
@@ -428,6 +467,107 @@ func createNetworkResourceCmd(resourceType string) tea.Cmd {
 	}
 }
 
+// =============================================================================
+// CONTAINER INSTANCE MANAGEMENT COMMANDS
+// =============================================================================
+
+// showContainerInstanceDetailsCmd displays detailed container instance information
+func showContainerInstanceDetailsCmd(name, resourceGroup string) tea.Cmd {
+	return func() tea.Msg {
+		content := aci.RenderContainerInstanceDetails(name, resourceGroup)
+		return containerInstanceDetailsMsg{content: content}
+	}
+}
+
+// getContainerLogsCmd retrieves container logs
+func getContainerLogsCmd(name, resourceGroup, containerName string, tail int) tea.Cmd {
+	return func() tea.Msg {
+		logs, err := aci.GetContainerLogs(name, resourceGroup, containerName, tail)
+		if err != nil {
+			return containerInstanceLogsMsg{content: fmt.Sprintf("Error getting logs: %v", err)}
+		}
+
+		// Format logs with header
+		content := fmt.Sprintf("🐳 Container Logs: %s\n", name)
+		content += "═══════════════════════════════════════════════════════════════\n\n"
+		content += logs
+
+		return containerInstanceLogsMsg{content: content}
+	}
+}
+
+// execIntoContainerCmd executes a command in the container
+func execIntoContainerCmd(name, resourceGroup, containerName, command string) tea.Cmd {
+	return func() tea.Msg {
+		err := aci.ExecIntoContainer(name, resourceGroup, containerName, command)
+		var result resourceactions.ActionResult
+
+		if err != nil {
+			result = resourceactions.ActionResult{
+				Success: false,
+				Message: fmt.Sprintf("Failed to exec into container: %v", err),
+				Output:  "",
+			}
+		} else {
+			result = resourceactions.ActionResult{
+				Success: true,
+				Message: fmt.Sprintf("Successfully executed command in container %s", name),
+				Output:  "Command executed successfully",
+			}
+		}
+
+		return containerInstanceActionMsg{action: "exec", result: result}
+	}
+}
+
+// attachToContainerCmd attaches to a running container
+func attachToContainerCmd(name, resourceGroup, containerName string) tea.Cmd {
+	return func() tea.Msg {
+		err := aci.AttachToContainer(name, resourceGroup, containerName)
+		var result resourceactions.ActionResult
+
+		if err != nil {
+			result = resourceactions.ActionResult{
+				Success: false,
+				Message: fmt.Sprintf("Failed to attach to container: %v", err),
+				Output:  "",
+			}
+		} else {
+			result = resourceactions.ActionResult{
+				Success: true,
+				Message: fmt.Sprintf("Successfully attached to container %s", name),
+				Output:  "Attached to container",
+			}
+		}
+
+		return containerInstanceActionMsg{action: "attach", result: result}
+	}
+}
+
+// scaleContainerInstanceCmd scales container instance resources
+func scaleContainerInstanceCmd(name, resourceGroup string, cpu, memory float64) tea.Cmd {
+	return func() tea.Msg {
+		err := aci.UpdateContainerInstance(name, resourceGroup, cpu, memory)
+		var result resourceactions.ActionResult
+
+		if err != nil {
+			result = resourceactions.ActionResult{
+				Success: false,
+				Message: fmt.Sprintf("Failed to scale container instance: %v", err),
+				Output:  "",
+			}
+		} else {
+			result = resourceactions.ActionResult{
+				Success: true,
+				Message: fmt.Sprintf("Successfully scaled container instance %s to %.1f CPU, %.1f GB RAM", name, cpu, memory),
+				Output:  fmt.Sprintf("New resources: %.1f CPU cores, %.1f GB memory", cpu, memory),
+			}
+		}
+
+		return containerInstanceScaleMsg{cpu: cpu, memory: memory, result: result}
+	}
+}
+
 func initModel() model {
 	// Initialize AI provider if API key is available
 	var ai *openai.AIProvider
@@ -539,6 +679,31 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case networkResourceCreatedMsg:
 		m.actionInProgress = false
 		m.logEntries = append(m.logEntries, fmt.Sprintf("Created %s: %s", msg.resourceType, msg.result.Message))
+
+	// Container Instance message handlers
+	case containerInstanceDetailsMsg:
+		m.actionInProgress = false
+		m.containerInstanceDetailsContent = msg.content
+		m.activeView = "container-details"
+
+	case containerInstanceLogsMsg:
+		m.actionInProgress = false
+		m.containerInstanceLogsContent = msg.content
+		m.activeView = "container-logs"
+
+	case containerInstanceActionMsg:
+		m.actionInProgress = false
+		m.lastActionResult = &msg.result
+		if msg.result.Success && m.selectedResource != nil {
+			return m, loadResourceDetailsCmd(*m.selectedResource)
+		}
+
+	case containerInstanceScaleMsg:
+		m.actionInProgress = false
+		m.lastActionResult = &msg.result
+		if msg.result.Success && m.selectedResource != nil {
+			return m, loadResourceDetailsCmd(*m.selectedResource)
+		}
 
 	case errorMsg:
 		m.loadingState = "error"
@@ -743,6 +908,39 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.actionInProgress = true
 				return m, createNetworkResourceCmd("loadbalancer")
 			}
+
+		// Container Instance Management Actions
+		case "L":
+			// Get container logs
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.ContainerInstance/containerGroups" {
+				m.actionInProgress = true
+				return m, getContainerLogsCmd(m.selectedResource.Name, m.selectedResource.ResourceGroup, "", 100)
+			}
+		case "E":
+			// Exec into container
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.ContainerInstance/containerGroups" {
+				m.actionInProgress = true
+				return m, execIntoContainerCmd(m.selectedResource.Name, m.selectedResource.ResourceGroup, "", "/bin/bash")
+			}
+		case "a":
+			// Attach to container (only for container instances)
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.ContainerInstance/containerGroups" {
+				m.actionInProgress = true
+				return m, attachToContainerCmd(m.selectedResource.Name, m.selectedResource.ResourceGroup, "")
+			}
+		case "u":
+			// Update/scale container instance
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.ContainerInstance/containerGroups" {
+				m.actionInProgress = true
+				// Scale up CPU and memory (this could be made interactive in future)
+				return m, scaleContainerInstanceCmd(m.selectedResource.Name, m.selectedResource.ResourceGroup, 2.0, 4.0)
+			}
+		case "I":
+			// Show detailed container instance information
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.ContainerInstance/containerGroups" {
+				m.actionInProgress = true
+				return m, showContainerInstanceDetailsCmd(m.selectedResource.Name, m.selectedResource.ResourceGroup)
+			}
 		case "R":
 			return m, loadDataCmd()
 		}
@@ -880,6 +1078,10 @@ func (m model) renderResourcePanel(width, height int) string {
 		return m.networkTopologyContent
 	case "network-ai":
 		return m.networkAIContent
+	case "container-details":
+		return m.containerInstanceDetailsContent
+	case "container-logs":
+		return m.containerInstanceLogsContent
 	}
 
 	// Handle regular resource views
@@ -935,6 +1137,18 @@ func (m model) renderWelcomePanel(width, height int) string {
 	content.WriteString(fmt.Sprintf("%s - Create Subnet\n", networkStyle.Render("Ctrl+S")))
 	content.WriteString(fmt.Sprintf("%s - Create Public IP\n", networkStyle.Render("Ctrl+P")))
 	content.WriteString(fmt.Sprintf("%s - Create Load Balancer\n\n", networkStyle.Render("Ctrl+L")))
+
+	content.WriteString(sectionStyle.Render("🐳 Container Instance Management:"))
+	content.WriteString("\n")
+	containerStyle := lipgloss.NewStyle().Foreground(colorPurple)
+	content.WriteString(fmt.Sprintf("%s - Start Container Instance\n", containerStyle.Render("s")))
+	content.WriteString(fmt.Sprintf("%s - Stop Container Instance\n", containerStyle.Render("S")))
+	content.WriteString(fmt.Sprintf("%s - Restart Container Instance\n", containerStyle.Render("r")))
+	content.WriteString(fmt.Sprintf("%s - Get Container Logs\n", containerStyle.Render("L")))
+	content.WriteString(fmt.Sprintf("%s - Exec into Container\n", containerStyle.Render("E")))
+	content.WriteString(fmt.Sprintf("%s - Attach to Container\n", containerStyle.Render("a")))
+	content.WriteString(fmt.Sprintf("%s - Scale Container Resources\n", containerStyle.Render("u")))
+	content.WriteString(fmt.Sprintf("%s - Container Instance Details\n\n", containerStyle.Render("I")))
 
 	content.WriteString(sectionStyle.Render("✨ New Features:"))
 	content.WriteString("\n")
@@ -1097,6 +1311,42 @@ func (m model) renderEnhancedResourceDetails(width, height int) string {
 		content.WriteString(fmt.Sprintf("%s List Deployments\n", actionStyle.Render("[D]")))
 		content.WriteString(fmt.Sprintf("%s List Nodes\n", actionStyle.Render("[n]")))
 		content.WriteString(fmt.Sprintf("%s List Services\n", actionStyle.Render("[v]")))
+
+		if m.actionInProgress {
+			progressStyle := lipgloss.NewStyle().Foreground(colorYellow)
+			content.WriteString("\n")
+			content.WriteString(progressStyle.Render("⏳ Action in progress..."))
+			content.WriteString("\n")
+		}
+
+		if m.lastActionResult != nil {
+			resultStyle := lipgloss.NewStyle().Foreground(colorRed)
+			icon := "❌"
+			if m.lastActionResult.Success {
+				resultStyle = lipgloss.NewStyle().Foreground(colorGreen)
+				icon = "✅"
+			}
+			content.WriteString("\n")
+			content.WriteString(fmt.Sprintf("%s %s", icon, resultStyle.Render(m.lastActionResult.Message)))
+			content.WriteString("\n")
+		}
+	}
+
+	// Actions Section for Container Instances
+	if resource.Type == "Microsoft.ContainerInstance/containerGroups" {
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("🐳 Container Instance Management"))
+		content.WriteString("\n")
+
+		actionStyle := lipgloss.NewStyle().Foreground(colorBlue)
+		content.WriteString(fmt.Sprintf("%s Start Container Instance\n", actionStyle.Render("[s]")))
+		content.WriteString(fmt.Sprintf("%s Stop Container Instance\n", actionStyle.Render("[S]")))
+		content.WriteString(fmt.Sprintf("%s Restart Container Instance\n", actionStyle.Render("[r]")))
+		content.WriteString(fmt.Sprintf("%s Get Container Logs\n", actionStyle.Render("[L]")))
+		content.WriteString(fmt.Sprintf("%s Exec into Container\n", actionStyle.Render("[E]")))
+		content.WriteString(fmt.Sprintf("%s Attach to Container\n", actionStyle.Render("[a]")))
+		content.WriteString(fmt.Sprintf("%s Scale Container Resources\n", actionStyle.Render("[u]")))
+		content.WriteString(fmt.Sprintf("%s Show Detailed Info\n", actionStyle.Render("[I]")))
 
 		if m.actionInProgress {
 			progressStyle := lipgloss.NewStyle().Foreground(colorYellow)
