@@ -143,6 +143,9 @@ type model struct {
 
 	// Help popup state
 	showHelpPopup bool
+
+	// Navigation stack for back navigation
+	navigationStack []string
 }
 
 func fetchSubscriptions() ([]Subscription, error) {
@@ -594,6 +597,7 @@ func initModel() model {
 		propertyExpandedIndex:  -1,
 		expandedProperties:     make(map[string]bool),
 		showHelpPopup:          false,
+		navigationStack:        []string{}, // Initialize navigation stack
 	}
 }
 
@@ -658,29 +662,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case networkDashboardMsg:
 		m.actionInProgress = false
 		m.networkDashboardContent = msg.content
-		m.activeView = "network-dashboard"
+		m.pushView("network-dashboard")
 		// Add debug logging
 		m.logEntries = append(m.logEntries, "DEBUG: Network Dashboard message received, content length: "+fmt.Sprintf("%d", len(msg.content)))
 
 	case vnetDetailsMsg:
 		m.actionInProgress = false
 		m.vnetDetailsContent = msg.content
-		m.activeView = "vnet-details"
+		m.pushView("vnet-details")
 
 	case nsgDetailsMsg:
 		m.actionInProgress = false
 		m.nsgDetailsContent = msg.content
-		m.activeView = "nsg-details"
+		m.pushView("nsg-details")
 
 	case networkTopologyMsg:
 		m.actionInProgress = false
 		m.networkTopologyContent = msg.content
-		m.activeView = "network-topology"
+		m.pushView("network-topology")
 
 	case networkAIAnalysisMsg:
 		m.actionInProgress = false
 		m.networkAIContent = msg.content
-		m.activeView = "network-ai"
+		m.pushView("network-ai")
 
 	case networkResourceCreatedMsg:
 		m.actionInProgress = false
@@ -690,12 +694,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case containerInstanceDetailsMsg:
 		m.actionInProgress = false
 		m.containerInstanceDetailsContent = msg.content
-		m.activeView = "container-details"
+		m.pushView("container-details")
 
 	case containerInstanceLogsMsg:
 		m.actionInProgress = false
 		m.containerInstanceLogsContent = msg.content
-		m.activeView = "container-logs"
+		m.pushView("container-logs")
 
 	case containerInstanceActionMsg:
 		m.actionInProgress = false
@@ -736,12 +740,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle dashboard view
 			m.showDashboard = !m.showDashboard
 			if m.showDashboard {
-				m.activeView = "dashboard"
+				m.pushView("dashboard")
 			} else {
 				if m.selectedResource != nil {
-					m.activeView = "details"
+					m.pushView("details")
 				} else {
-					m.activeView = "welcome"
+					m.pushView("welcome")
 				}
 			}
 		case "j", "down":
@@ -987,9 +991,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle help popup
 			m.showHelpPopup = !m.showHelpPopup
 		case "escape":
-			// Close help popup if open
+			// Close help popup if open, otherwise navigate back
 			if m.showHelpPopup {
 				m.showHelpPopup = false
+			} else {
+				// Try to go back to previous view
+				if !m.popView() {
+					// If no previous view, stay on current view
+					// Could optionally set to welcome view here
+				}
 			}
 		}
 	}
@@ -1046,6 +1056,11 @@ func (m model) View() string {
 		// Add expansion hint for AKS resources
 		if m.selectedResource != nil && m.selectedResource.Type == "Microsoft.ContainerService/managedClusters" && m.selectedPanel == 1 {
 			m.statusBar.AddSegment("e:Expand AKS Properties", colorYellow, bgMedium)
+		}
+
+		// Add navigation indicator if there's history
+		if len(m.navigationStack) > 0 {
+			m.statusBar.AddSegment(fmt.Sprintf("Esc:Back(%d)", len(m.navigationStack)), colorAqua, bgMedium)
 		}
 
 		m.statusBar.AddSegment("Tab:Switch d:Dashboard s:Start S:Stop r:Restart R:Refresh ?:Help q:Quit", colorGray, bgLight)
@@ -1189,7 +1204,7 @@ func (m model) View() string {
 		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGray).Render("🎮 Interface:"))
 		helpContent.WriteString("\n")
 		helpContent.WriteString("?          Show/hide this help\n")
-		helpContent.WriteString("Esc        Close dialogs/popups\n")
+		helpContent.WriteString("Esc        Navigate back / Close dialogs\n")
 		helpContent.WriteString("q          Quit application\n\n")
 
 		helpContent.WriteString(lipgloss.NewStyle().Italic(true).Foreground(colorGray).Render("Press '?' or 'Esc' to close this help"))
@@ -1666,6 +1681,46 @@ func ensureContentWidth(content string, maxWidth int) string {
 
 	return strings.TrimSuffix(result.String(), "\n")
 }
+
+// Navigation stack helper functions
+
+// pushView adds the current view to the navigation stack before switching to a new view
+func (m *model) pushView(newView string) {
+	// Only push if we're actually changing views
+	if m.activeView != newView {
+		m.navigationStack = append(m.navigationStack, m.activeView)
+		m.activeView = newView
+	}
+}
+
+// popView goes back to the previous view from the navigation stack
+func (m *model) popView() bool {
+	if len(m.navigationStack) == 0 {
+		return false // No previous view to go back to
+	}
+
+	// Get the last view from the stack
+	lastIndex := len(m.navigationStack) - 1
+	previousView := m.navigationStack[lastIndex]
+
+	// Remove it from the stack
+	m.navigationStack = m.navigationStack[:lastIndex]
+
+	// Switch to the previous view
+	m.activeView = previousView
+
+	// Reset scroll offsets when going back
+	m.rightPanelScrollOffset = 0
+	m.leftPanelScrollOffset = 0
+
+	return true
+}
+
+// clearNavigationStack clears the navigation history (useful for returning to main menu)
+func (m *model) clearNavigationStack() {
+	m.navigationStack = []string{}
+}
+
 func getResourceTypeDisplayName(resourceType string) string {
 	displayNames := map[string]string{
 		"Microsoft.Compute/virtualMachines":          "Virtual Machine",
@@ -1974,7 +2029,7 @@ func createShortcutsMap() map[string]string {
 
 		// Interface
 		"?":   "Show/hide this help",
-		"Esc": "Close dialogs/popups",
+		"Esc": "Navigate back / Close dialogs",
 		"q":   "Quit application",
 	}
 }
