@@ -22,11 +22,15 @@ type VirtualNetwork struct {
 	ResourceGroup string                 `json:"resourceGroup"`
 	ID            string                 `json:"id"`
 	Type          string                 `json:"type"`
-	AddressSpace  []string               `json:"addressSpace"`
+	AddressSpace  AddressSpace           `json:"addressSpace"`
 	Subnets       []Subnet               `json:"subnets"`
 	DnsServers    []string               `json:"dnsServers"`
 	Tags          map[string]interface{} `json:"tags"`
 	Properties    map[string]interface{} `json:"properties"`
+}
+
+type AddressSpace struct {
+	AddressPrefixes []string `json:"addressPrefixes"`
 }
 
 type Subnet struct {
@@ -47,9 +51,19 @@ type NetworkSecurityGroup struct {
 	Type              string                 `json:"type"`
 	SecurityRules     []SecurityRule         `json:"securityRules"`
 	DefaultRules      []SecurityRule         `json:"defaultSecurityRules"`
-	NetworkInterfaces []string               `json:"networkInterfaces"`
-	Subnets           []string               `json:"subnets"`
+	NetworkInterfaces []NetworkInterfaceRef  `json:"networkInterfaces"`
+	Subnets           []SubnetRef            `json:"subnets"`
 	Tags              map[string]interface{} `json:"tags"`
+}
+
+type NetworkInterfaceRef struct {
+	ID            string `json:"id"`
+	ResourceGroup string `json:"resourceGroup"`
+}
+
+type SubnetRef struct {
+	ID            string `json:"id"`
+	ResourceGroup string `json:"resourceGroup"`
 }
 
 type SecurityRule struct {
@@ -89,24 +103,45 @@ type PublicIP struct {
 	ID                 string                 `json:"id"`
 	IPAddress          string                 `json:"ipAddress"`
 	AllocationMethod   string                 `json:"publicIPAllocationMethod"`
-	SKU                string                 `json:"sku"`
+	SKU                PublicIPSKU            `json:"sku"`
 	Zone               []string               `json:"zones"`
 	AssociatedResource string                 `json:"associatedResource"`
 	Tags               map[string]interface{} `json:"tags"`
 }
 
+type PublicIPSKU struct {
+	Name string `json:"name"`
+	Tier string `json:"tier"`
+}
+
 type NetworkInterface struct {
-	Name               string                 `json:"name"`
-	Location           string                 `json:"location"`
-	ResourceGroup      string                 `json:"resourceGroup"`
-	ID                 string                 `json:"id"`
-	PrivateIPAddress   string                 `json:"privateIPAddress"`
-	PublicIPAddress    string                 `json:"publicIPAddress"`
-	SubnetID           string                 `json:"subnetId"`
-	NSGName            string                 `json:"networkSecurityGroup"`
-	VirtualMachine     string                 `json:"virtualMachine"`
-	EnableIPForwarding bool                   `json:"enableIPForwarding"`
-	Tags               map[string]interface{} `json:"tags"`
+	Name                 string                   `json:"name"`
+	Location             string                   `json:"location"`
+	ResourceGroup        string                   `json:"resourceGroup"`
+	ID                   string                   `json:"id"`
+	IPConfigurations     []IPConfiguration        `json:"ipConfigurations"`
+	NetworkSecurityGroup *NetworkSecurityGroupRef `json:"networkSecurityGroup"`
+	VirtualMachine       *VirtualMachineRef       `json:"virtualMachine"`
+	EnableIPForwarding   bool                     `json:"enableIPForwarding"`
+	Tags                 map[string]interface{}   `json:"tags"`
+}
+
+type IPConfiguration struct {
+	Name             string       `json:"name"`
+	PrivateIPAddress string       `json:"privateIPAddress"`
+	PublicIPAddress  *PublicIPRef `json:"publicIPAddress"`
+	SubnetRef        *SubnetRef   `json:"subnet"`
+	Primary          bool         `json:"primary"`
+}
+
+type NetworkSecurityGroupRef struct {
+	ID            string `json:"id"`
+	ResourceGroup string `json:"resourceGroup"`
+}
+
+type VirtualMachineRef struct {
+	ID            string `json:"id"`
+	ResourceGroup string `json:"resourceGroup"`
 }
 
 type LoadBalancer struct {
@@ -114,7 +149,7 @@ type LoadBalancer struct {
 	Location           string                 `json:"location"`
 	ResourceGroup      string                 `json:"resourceGroup"`
 	ID                 string                 `json:"id"`
-	SKU                string                 `json:"sku"`
+	SKU                LoadBalancerSKU        `json:"sku"`
 	Type               string                 `json:"type"`
 	FrontendIPs        []FrontendIP           `json:"frontendIPConfigurations"`
 	BackendPools       []BackendPool          `json:"backendAddressPools"`
@@ -123,11 +158,21 @@ type LoadBalancer struct {
 	Tags               map[string]interface{} `json:"tags"`
 }
 
+type LoadBalancerSKU struct {
+	Name string `json:"name"`
+	Tier string `json:"tier"`
+}
+
 type FrontendIP struct {
-	Name             string `json:"name"`
-	PrivateIPAddress string `json:"privateIPAddress"`
-	PublicIPAddress  string `json:"publicIPAddress"`
-	SubnetID         string `json:"subnetId"`
+	Name             string       `json:"name"`
+	PrivateIPAddress string       `json:"privateIPAddress"`
+	PublicIPAddress  *PublicIPRef `json:"publicIPAddress"`
+	SubnetID         string       `json:"subnetId"`
+}
+
+type PublicIPRef struct {
+	ID            string `json:"id"`
+	ResourceGroup string `json:"resourceGroup"`
 }
 
 type BackendPool struct {
@@ -647,11 +692,12 @@ func ListFirewalls() ([]Firewall, error) {
 	cmd := exec.Command("az", "network", "firewall", "list", "--output", "json")
 	out, err := cmd.Output()
 	if err != nil {
-		return nil, err
+		// Azure Firewall extension may not be installed - return empty list instead of error
+		return []Firewall{}, nil
 	}
 	var fws []Firewall
 	if err := json.Unmarshal(out, &fws); err != nil {
-		return nil, err
+		return []Firewall{}, nil
 	}
 	return fws, nil
 }
@@ -687,8 +733,10 @@ func calculateNetworkSummary(dashboard *NetworkDashboard) NetworkSummary {
 
 	// Count private IPs from network interfaces
 	for _, nic := range dashboard.NetworkInterfaces {
-		if nic.PrivateIPAddress != "" {
-			summary.TotalPrivateIPs++
+		for _, ipConfig := range nic.IPConfigurations {
+			if ipConfig.PrivateIPAddress != "" {
+				summary.TotalPrivateIPs++
+			}
 		}
 	}
 
@@ -749,7 +797,7 @@ resource "azurerm_virtual_network" "%s" {
   }
 }
 `
-	addressSpace := `"` + strings.Join(vnet.AddressSpace, `", "`) + `"`
+	addressSpace := `"` + strings.Join(vnet.AddressSpace.AddressPrefixes, `", "`) + `"`
 	return fmt.Sprintf(template,
 		strings.ReplaceAll(vnet.Name, "-", "_"),
 		vnet.Name,
@@ -799,7 +847,7 @@ resource virtualNetwork 'Microsoft.Network/virtualNetworks@2023-09-01' = {
 
 output vnetId string = virtualNetwork.id
 `
-	addressPrefixes := "'" + strings.Join(vnet.AddressSpace, "', '") + "'"
+	addressPrefixes := "'" + strings.Join(vnet.AddressSpace.AddressPrefixes, "', '") + "'"
 	return fmt.Sprintf(template, vnet.Location, vnet.Name, addressPrefixes)
 }
 
@@ -901,19 +949,52 @@ func RenderNetworkDashboard() string {
 
 	// Network Interfaces
 	for _, nic := range dashboard.NetworkInterfaces {
-		details := nic.PrivateIPAddress
-		if nic.PublicIPAddress != "" {
-			details += fmt.Sprintf(" / %s", nic.PublicIPAddress)
+		details := ""
+
+		// Extract IP addresses from primary IP configuration
+		for _, ipConfig := range nic.IPConfigurations {
+			if ipConfig.Primary {
+				details = ipConfig.PrivateIPAddress
+				if ipConfig.PublicIPAddress != nil {
+					// Extract public IP name from the ID
+					publicIPName := ""
+					if parts := strings.Split(ipConfig.PublicIPAddress.ID, "/"); len(parts) > 0 {
+						publicIPName = parts[len(parts)-1]
+					}
+					details += fmt.Sprintf(" / %s", publicIPName)
+				}
+				break
+			}
 		}
-		if nic.VirtualMachine != "" {
-			details += fmt.Sprintf(" → %s", nic.VirtualMachine)
+
+		// If no primary IP config, use the first one
+		if details == "" && len(nic.IPConfigurations) > 0 {
+			ipConfig := nic.IPConfigurations[0]
+			details = ipConfig.PrivateIPAddress
+			if ipConfig.PublicIPAddress != nil {
+				// Extract public IP name from the ID
+				publicIPName := ""
+				if parts := strings.Split(ipConfig.PublicIPAddress.ID, "/"); len(parts) > 0 {
+					publicIPName = parts[len(parts)-1]
+				}
+				details += fmt.Sprintf(" / %s", publicIPName)
+			}
+		}
+
+		if nic.VirtualMachine != nil {
+			// Extract VM name from the ID
+			vmName := ""
+			if parts := strings.Split(nic.VirtualMachine.ID, "/"); len(parts) > 0 {
+				vmName = parts[len(parts)-1]
+			}
+			details += fmt.Sprintf(" → %s", vmName)
 		}
 		rows = append(rows, []string{"🔗 Network Interface", nic.Name, nic.Location, nic.ResourceGroup, "Active", details})
 	}
 
 	// Load Balancers
 	for _, lb := range dashboard.LoadBalancers {
-		details := fmt.Sprintf("%s (%d frontends, %d backends)", lb.SKU, len(lb.FrontendIPs), len(lb.BackendPools))
+		details := fmt.Sprintf("%s (%d frontends, %d backends)", lb.SKU.Name, len(lb.FrontendIPs), len(lb.BackendPools))
 		rows = append(rows, []string{"⚖️ Load Balancer", lb.Name, lb.Location, lb.ResourceGroup, "Active", details})
 	}
 
@@ -951,7 +1032,7 @@ func RenderVNetDetails(vnetName, resourceGroup string) string {
 	rows = append(rows, []string{"Resource Group", vnet.ResourceGroup})
 	rows = append(rows, []string{"Location", vnet.Location})
 	rows = append(rows, []string{"Resource ID", vnet.ID})
-	rows = append(rows, []string{"Address Space", strings.Join(vnet.AddressSpace, ", ")})
+	rows = append(rows, []string{"Address Space", strings.Join(vnet.AddressSpace.AddressPrefixes, ", ")})
 
 	if len(vnet.DnsServers) > 0 {
 		rows = append(rows, []string{"DNS Servers", strings.Join(vnet.DnsServers, ", ")})

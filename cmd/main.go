@@ -513,6 +513,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.actionInProgress = false
 		m.networkDashboardContent = msg.content
 		m.activeView = "network-dashboard"
+		// Add debug logging
+		m.logEntries = append(m.logEntries, "DEBUG: Network Dashboard message received, content length: "+fmt.Sprintf("%d", len(msg.content)))
 
 	case vnetDetailsMsg:
 		m.actionInProgress = false
@@ -681,6 +683,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Show comprehensive network dashboard
 			if !m.actionInProgress {
 				m.actionInProgress = true
+				// Add debug logging
+				m.logEntries = append(m.logEntries, "DEBUG: Network Dashboard command triggered")
 				return m, showNetworkDashboardCmd()
 			}
 		case "V":
