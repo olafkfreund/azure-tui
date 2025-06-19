@@ -168,6 +168,23 @@ func (se *SearchEngine) searchResource(resource Resource, query SearchQuery) []S
 		return results
 	}
 
+	// If this is a filter-only query (no search terms), return the resource as a match
+	if len(query.Terms) == 0 && query.IsAdvanced {
+		results = append(results, SearchResult{
+			ResourceID:    resource.ID,
+			ResourceName:  resource.Name,
+			ResourceType:  resource.Type,
+			Location:      resource.Location,
+			ResourceGroup: resource.ResourceGroup,
+			Tags:          resource.Tags,
+			MatchType:     "filter",
+			MatchText:     "filter match",
+			MatchValue:    "matches filters",
+			Score:         100,
+		})
+		return results
+	}
+
 	// Search in resource name
 	if matches := se.searchInText(resource.Name, query.Terms, query.Wildcards); len(matches) > 0 {
 		for _, match := range matches {
@@ -284,7 +301,7 @@ func (se *SearchEngine) searchResource(resource Resource, query SearchQuery) []S
 
 // matchesFilters checks if a resource matches the specified filters
 func (se *SearchEngine) matchesFilters(resource Resource, filters SearchFilters) bool {
-	if filters.ResourceType != "" && !se.matchesText(resource.Type, filters.ResourceType, false) {
+	if filters.ResourceType != "" && !se.matchesResourceType(resource.Type, filters.ResourceType) {
 		return false
 	}
 
@@ -346,6 +363,51 @@ func (se *SearchEngine) matchesText(text, term string, wildcards bool) bool {
 	}
 
 	return strings.Contains(textLower, termLower)
+}
+
+// matchesResourceType checks if a resource type matches a search term with type aliases
+func (se *SearchEngine) matchesResourceType(resourceType, searchTerm string) bool {
+	resourceTypeLower := strings.ToLower(resourceType)
+	searchTermLower := strings.ToLower(searchTerm)
+
+	// First try exact match or contains
+	if strings.Contains(resourceTypeLower, searchTermLower) {
+		return true
+	}
+
+	// Handle common type aliases
+	typeAliases := map[string][]string{
+		"vm":       {"Microsoft.Compute/virtualMachines", "virtualmachine", "virtualmachines"},
+		"storage":  {"Microsoft.Storage/storageAccounts", "storageaccount", "storageaccounts"},
+		"aks":      {"Microsoft.ContainerService/managedClusters", "managedcluster", "managedclusters"},
+		"network":  {"Microsoft.Network/virtualNetworks", "virtualnetwork", "virtualnetworks"},
+		"keyvault": {"Microsoft.KeyVault/vaults", "vault", "vaults"},
+		"sql":      {"Microsoft.Sql/servers", "server", "servers"},
+		"acr":      {"Microsoft.ContainerRegistry/registries", "registry", "registries"},
+		"aci":      {"Microsoft.ContainerInstance/containerGroups", "containergroup", "containergroups"},
+		"webapp":   {"Microsoft.Web/sites", "site", "sites"},
+		"function": {"Microsoft.Web/sites", "functionapp", "functions"},
+	}
+
+	// Check if search term matches any aliases
+	if aliases, exists := typeAliases[searchTermLower]; exists {
+		for _, alias := range aliases {
+			if strings.Contains(resourceTypeLower, strings.ToLower(alias)) {
+				return true
+			}
+		}
+	}
+
+	// Check reverse - if the resource type contains the simplified term
+	typeParts := strings.Split(resourceType, "/")
+	if len(typeParts) > 1 {
+		simpleType := strings.ToLower(typeParts[len(typeParts)-1])
+		if strings.Contains(simpleType, searchTermLower) {
+			return true
+		}
+	}
+
+	return false
 }
 
 // matchesWildcard performs wildcard matching
