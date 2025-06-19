@@ -343,10 +343,15 @@ jobs:
 
     - name: Prepare release assets
       run: |
+        echo "🔧 Preparing release assets..."
         mkdir -p release
+        
+        echo "Debug: Downloaded artifacts:"
+        find artifacts -type f -name "*" | head -20
         
         # Copy all binaries to release directory
         find artifacts -name "${{ env.APP_NAME }}-*" -type f | while read file; do
+          echo "Copying: $file -> release/"
           cp "$file" release/
         done
         
@@ -357,30 +362,46 @@ jobs:
         
         # Create checksums file
         cd release
+        echo "Creating checksums for files:"
+        ls -la ${{ env.APP_NAME }}-*
         sha256sum ${{ env.APP_NAME }}-* > checksums.txt
         
+        echo "Release directory contents:"
         ls -la
 
     - name: Create release archive
+      env:
+        TAG_NAME: ${{ steps.tag.outputs.tag }}
+        APP_NAME: ${{ env.APP_NAME }}
       run: |
+        echo "📦 Creating release archive..."
+        echo "Debug: TAG_NAME=${TAG_NAME}, APP_NAME=${APP_NAME}"
         cd release
-        tar -czf ../${{ env.APP_NAME }}-${{ steps.tag.outputs.tag }}-release.tar.gz .
+        tar -czf ../${APP_NAME}-${TAG_NAME}-release.tar.gz .
         cd ..
         
         echo "📦 Release archive created:"
-        ls -la ${{ env.APP_NAME }}-${{ steps.tag.outputs.tag }}-release.tar.gz
+        ls -la ${APP_NAME}-${TAG_NAME}-release.tar.gz
 
     - name: Validate release assets
+      env:
+        TAG_NAME: ${{ steps.tag.outputs.tag }}
+        APP_NAME: ${{ env.APP_NAME }}
       run: |
         echo "🔍 Validating release assets..."
+        echo "Debug: TAG_NAME=${TAG_NAME}, APP_NAME=${APP_NAME}"
+        echo "Debug: Current directory contents:"
+        ls -la
+        echo "Debug: Release directory contents:"
+        ls -la release/
         
         # Check if all required files exist
         REQUIRED_FILES=(
-          "${{ env.APP_NAME }}-${{ steps.tag.outputs.tag }}-release.tar.gz"
-          "release/${{ env.APP_NAME }}-linux-amd64"
-          "release/${{ env.APP_NAME }}-windows-amd64.exe"
-          "release/${{ env.APP_NAME }}-darwin-amd64"
-          "release/${{ env.APP_NAME }}-darwin-arm64"
+          "${APP_NAME}-${TAG_NAME}-release.tar.gz"
+          "release/${APP_NAME}-linux-amd64"
+          "release/${APP_NAME}-windows-amd64.exe"
+          "release/${APP_NAME}-darwin-amd64"
+          "release/${APP_NAME}-darwin-arm64"
           "release/checksums.txt"
         )
         
@@ -389,6 +410,7 @@ jobs:
             echo "✅ $file exists ($(du -h "$file" | cut -f1))"
           else
             echo "❌ $file missing"
+            echo "Debug: Looking for file: $file"
             exit 1
           fi
         done
