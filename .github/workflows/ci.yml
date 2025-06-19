@@ -15,6 +15,8 @@ permissions:
   packages: write
   issues: write
   pull-requests: write
+  actions: read
+  checks: read
 
 env:
   GO_VERSION: '1.24.3'
@@ -304,6 +306,7 @@ jobs:
     permissions:
       contents: write
       packages: write
+      actions: read
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -312,6 +315,15 @@ jobs:
 
     - name: Install Just
       uses: extractions/setup-just@v1
+
+    - name: Debug GitHub context
+      run: |
+        echo "GitHub Event: ${{ github.event_name }}"
+        echo "GitHub Ref: ${{ github.ref }}"
+        echo "GitHub Ref Name: ${{ github.ref_name }}"
+        echo "Repository: ${{ github.repository }}"
+        echo "Actor: ${{ github.actor }}"
+        echo "Token available: ${{ secrets.GITHUB_TOKEN != '' }}"
 
     - name: Determine release tag
       id: tag
@@ -349,6 +361,31 @@ jobs:
         
         ls -la
 
+    - name: Validate release assets
+      run: |
+        echo "🔍 Validating release assets..."
+        
+        # Check if all required files exist
+        REQUIRED_FILES=(
+          "${{ env.APP_NAME }}-${{ steps.tag.outputs.tag }}-release.tar.gz"
+          "release/${{ env.APP_NAME }}-linux-amd64"
+          "release/${{ env.APP_NAME }}-windows-amd64.exe"
+          "release/${{ env.APP_NAME }}-darwin-amd64"
+          "release/${{ env.APP_NAME }}-darwin-arm64"
+          "release/checksums.txt"
+        )
+        
+        for file in "${REQUIRED_FILES[@]}"; do
+          if [ -f "$file" ]; then
+            echo "✅ $file exists ($(du -h "$file" | cut -f1))"
+          else
+            echo "❌ $file missing"
+            exit 1
+          fi
+        done
+        
+        echo "✅ All release assets validated"
+
     - name: Create release archive
       run: |
         cd release
@@ -359,7 +396,7 @@ jobs:
         ls -la ${{ env.APP_NAME }}-${{ steps.tag.outputs.tag }}-release.tar.gz
 
     - name: Upload release assets
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v1
       with:
         tag_name: ${{ steps.tag.outputs.tag }}
         files: |
@@ -370,6 +407,10 @@ jobs:
           release/${{ env.APP_NAME }}-darwin-arm64
           release/checksums.txt
         token: ${{ secrets.GITHUB_TOKEN }}
+        fail_on_unmatched_files: true
+        generate_release_notes: false
+        draft: false
+        prerelease: false
         body: |
           ## 🚀 Azure TUI Release ${{ steps.tag.outputs.tag }}
           
