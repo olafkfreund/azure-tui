@@ -148,13 +148,13 @@ deps:
 # Lint code (requires golangci-lint)
 lint:
 	@echo "Running linter..."
-	golangci-lint run ./...
+	$(go env GOPATH)/bin/golangci-lint run ./...
 	@echo "✅ Linting complete"
 
 # Check for security issues (requires gosec)
 security:
 	@echo "Running security check..."
-	gosec ./...
+	$(go env GOPATH)/bin/gosec ./...
 	@echo "✅ Security check complete"
 
 # Run all quality checks
@@ -187,7 +187,7 @@ install-tools:
 	@echo "Installing development tools..."
 	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install golang.org/x/tools/cmd/goimports@latest
-	go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+	go install github.com/securego/gosec/v2/cmd/gosec@latest
 	@echo "✅ Development tools installed"
 
 # =============================================================================

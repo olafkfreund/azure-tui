@@ -72,7 +72,8 @@ jobs:
     - name: Install linting tools
       run: |
         go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-        go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+        go install github.com/securego/gosec/v2/cmd/gosec@latest
+        echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
     - name: Run linter
       run: just lint
