@@ -161,6 +161,14 @@ security:
 qa: fmt tidy lint test
 	@echo "✅ All quality checks passed!"
 
+# Run security and linting checks (not used in CI)
+qa-full: fmt tidy lint test security
+	@echo "✅ All quality checks including security passed!"
+
+# Check only security and linting (for local development)
+check-code: lint security
+	@echo "✅ Code quality checks complete!"
+
 # =============================================================================
 # UTILITY TASKS
 # =============================================================================
