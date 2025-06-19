@@ -253,3 +253,64 @@ uninstall:
 	@echo "Uninstalling {{APP_NAME}} from /usr/local/bin..."
 	sudo rm -f /usr/local/bin/{{APP_NAME}}
 	@echo "✅ {{APP_NAME}} uninstalled successfully!"
+
+# =============================================================================
+# RELEASE MANAGEMENT
+# =============================================================================
+
+# Create a new release (requires version tag)
+create-release VERSION DESCRIPTION="":
+	@echo "🚀 Creating release {{VERSION}}..."
+	@if [ -z "{{DESCRIPTION}}" ]; then \
+		./scripts/create-release.sh "{{VERSION}}"; \
+	else \
+		./scripts/create-release.sh "{{VERSION}}" "{{DESCRIPTION}}"; \
+	fi
+
+# Check if ready for release
+check-release:
+	@echo "🔍 Checking if repository is ready for release..."
+	@echo "Running full quality assurance..."
+	just qa-full
+	@echo ""
+	@echo "🔍 Checking git status..."
+	@if [ -n "$$(git status --porcelain)" ]; then \
+		echo "❌ Working directory is not clean. Please commit or stash changes."; \
+		git status; \
+		exit 1; \
+	fi
+	@echo "✅ Repository is clean"
+	@echo ""
+	@echo "🏷️  Recent tags:"
+	@git tag --sort=-version:refname | head -5 || echo "No tags found"
+	@echo ""
+	@echo "✅ Repository is ready for release!"
+	@echo ""
+	@echo "💡 To create a release, run:"
+	@echo "   just create-release v1.0.0 'Release description'"
+
+# List recent releases
+list-releases:
+	@echo "📋 Recent releases:"
+	@git tag --sort=-version:refname | head -10 || echo "No releases found"
+
+# Show release status
+release-status:
+	@echo "📊 Release Status"
+	@echo "================="
+	@echo ""
+	@echo "🏷️  Latest tag: $$(git describe --tags --abbrev=0 2>/dev/null || echo 'No tags')"
+	@echo "📝 Current commit: $$(git rev-parse --short HEAD)"
+	@echo "🌿 Current branch: $$(git branch --show-current)"
+	@echo ""
+	@echo "🔍 Build status:"
+	@if just build > /dev/null 2>&1; then \
+		echo "✅ Build: Success"; \
+	else \
+		echo "❌ Build: Failed"; \
+	fi
+	@if just test > /dev/null 2>&1; then \
+		echo "✅ Tests: Pass"; \
+	else \
+		echo "❌ Tests: Fail"; \
+	fi
