@@ -231,6 +231,11 @@ test-keyvault:
 # RELEASE TASKS
 # =============================================================================
 
+# Test release workflow components
+test-release:
+	@echo "🧪 Testing release workflow..."
+	./scripts/test-release-workflow.sh
+
 # Create a release build with all platforms
 release: clean qa build-all
 	@echo "Creating release archive..."
