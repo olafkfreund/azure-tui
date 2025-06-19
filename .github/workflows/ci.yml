@@ -361,6 +361,15 @@ jobs:
         
         ls -la
 
+    - name: Create release archive
+      run: |
+        cd release
+        tar -czf ../${{ env.APP_NAME }}-${{ steps.tag.outputs.tag }}-release.tar.gz .
+        cd ..
+        
+        echo "📦 Release archive created:"
+        ls -la ${{ env.APP_NAME }}-${{ steps.tag.outputs.tag }}-release.tar.gz
+
     - name: Validate release assets
       run: |
         echo "🔍 Validating release assets..."
@@ -385,15 +394,6 @@ jobs:
         done
         
         echo "✅ All release assets validated"
-
-    - name: Create release archive
-      run: |
-        cd release
-        tar -czf ../${{ env.APP_NAME }}-${{ steps.tag.outputs.tag }}-release.tar.gz .
-        cd ..
-        
-        echo "📦 Release archive created:"
-        ls -la ${{ env.APP_NAME }}-${{ steps.tag.outputs.tag }}-release.tar.gz
 
     - name: Upload release assets
       uses: softprops/action-gh-release@v1
