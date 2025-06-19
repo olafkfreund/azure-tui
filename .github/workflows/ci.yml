@@ -29,7 +29,7 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
 
     - name: Cache Go modules
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cache/go-build
@@ -63,7 +63,7 @@ jobs:
       run: just test-coverage
 
     - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v3
+      uses: codecov/codecov-action@v4
       with:
         file: ./coverage.out
         flags: unittests
@@ -144,7 +144,7 @@ jobs:
         go-version: ${{ env.GO_VERSION }}
 
     - name: Cache Go modules
-      uses: actions/cache@v3
+      uses: actions/cache@v4
       with:
         path: |
           ~/.cache/go-build
@@ -182,7 +182,7 @@ jobs:
         ls -la "$BINARY_NAME"
 
     - name: Upload build artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: ${{ env.APP_NAME }}-${{ matrix.os }}-${{ matrix.arch }}
         path: |
@@ -208,7 +208,7 @@ jobs:
       uses: extractions/setup-just@v1
 
     - name: Test search package specifically
-      run: just test-pkg search
+      run: just test-pkg internal/search
 
     - name: Build and verify search functionality
       run: |
@@ -273,7 +273,7 @@ jobs:
       uses: extractions/setup-just@v1
 
     - name: Download Linux binary
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         name: ${{ env.APP_NAME }}-linux-amd64
         path: ./
@@ -303,7 +303,7 @@ jobs:
       uses: extractions/setup-just@v1
 
     - name: Download all artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         path: artifacts
 
