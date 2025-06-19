@@ -575,6 +575,76 @@ func scaleContainerInstanceCmd(name, resourceGroup string, cpu, memory float64) 
 	}
 }
 
+// getContextualShortcuts returns relevant shortcuts based on the selected resource and current view
+func (m model) getContextualShortcuts() string {
+	var shortcuts []string
+
+	// Always available shortcuts
+	baseShortcuts := []string{"Tab:Switch", "?:Help", "q:Quit"}
+
+	// Context-specific shortcuts based on selected resource
+	if m.selectedResource != nil {
+		switch m.selectedResource.Type {
+		case "Microsoft.Compute/virtualMachines":
+			shortcuts = append(shortcuts, []string{
+				"s:Start", "S:Stop", "r:Restart",
+				"c:SSH", "b:Bastion", "d:Dashboard",
+			}...)
+
+		case "Microsoft.ContainerService/managedClusters":
+			shortcuts = append(shortcuts, []string{
+				"s:Start", "S:Stop", "p:Pods",
+				"D:Deployments", "n:Nodes", "v:Services",
+			}...)
+
+		case "Microsoft.ContainerInstance/containerGroups":
+			shortcuts = append(shortcuts, []string{
+				"s:Start", "S:Stop", "r:Restart",
+				"L:Logs", "E:Exec", "a:Attach", "u:Scale", "I:Details",
+			}...)
+
+		case "Microsoft.Network/virtualNetworks":
+			shortcuts = append(shortcuts, []string{
+				"V:VNet Details", "N:Network Dashboard",
+				"Z:Topology", "A:AI Analysis", "C:Create VNet",
+			}...)
+
+		case "Microsoft.Network/networkSecurityGroups":
+			shortcuts = append(shortcuts, []string{
+				"G:NSG Details", "N:Network Dashboard",
+				"Z:Topology", "A:AI Analysis", "Ctrl+N:Create NSG",
+			}...)
+
+		case "Microsoft.Storage/storageAccounts":
+			shortcuts = append(shortcuts, []string{
+				"d:Dashboard", "R:Refresh",
+			}...)
+
+		case "Microsoft.KeyVault/vaults":
+			shortcuts = append(shortcuts, []string{
+				"d:Dashboard", "R:Refresh",
+			}...)
+
+		default:
+			// Generic resource shortcuts
+			shortcuts = append(shortcuts, []string{
+				"d:Dashboard", "R:Refresh",
+			}...)
+		}
+	} else {
+		// No resource selected - show navigation shortcuts
+		shortcuts = append(shortcuts, []string{
+			"N:Network Dashboard", "Z:Topology", "A:AI Analysis",
+			"Space:Expand", "Enter:Select", "R:Refresh",
+		}...)
+	}
+
+	// Add base shortcuts
+	shortcuts = append(shortcuts, baseShortcuts...)
+
+	return strings.Join(shortcuts, " ")
+}
+
 func initModel() model {
 	// Initialize AI provider if API key is available
 	var ai *openai.AIProvider
@@ -1063,7 +1133,8 @@ func (m model) View() string {
 			m.statusBar.AddSegment(fmt.Sprintf("Esc:Back(%d)", len(m.navigationStack)), colorAqua, bgMedium)
 		}
 
-		m.statusBar.AddSegment("Tab:Switch d:Dashboard s:Start S:Stop r:Restart R:Refresh ?:Help q:Quit", colorGray, bgLight)
+		// Add contextual shortcuts
+		m.statusBar.AddSegment(m.getContextualShortcuts(), colorGray, bgLight)
 	}
 
 	// Two-panel layout - Fixed width constraints to prevent layout breaking
@@ -1082,12 +1153,8 @@ func (m model) View() string {
 	treeContent := ""
 	if m.treeView != nil {
 		treeContentRaw := m.treeView.RenderTreeView(leftWidth-4, m.height-2)
-		// Apply scrolling to left panel if it has long content
-		if m.selectedPanel == 0 {
-			treeContent = m.renderScrollableContentWithOffset(treeContentRaw, m.height-6, m.leftPanelScrollOffset)
-		} else {
-			treeContent = treeContentRaw
-		}
+		// ALWAYS apply left panel scroll offset to maintain independent position
+		treeContent = m.renderScrollableContentWithOffset(treeContentRaw, m.height-6, m.leftPanelScrollOffset)
 	}
 
 	// Style left panel with STRICT width constraints
@@ -1114,14 +1181,8 @@ func (m model) View() string {
 	// Ensure content is properly wrapped to prevent layout breaking
 	rightContentWrapped := ensureContentWidth(rightContentRaw, rightWidth-8)
 
-	var rightContent string
-
-	// Apply scrolling if right panel is active
-	if m.selectedPanel == 1 {
-		rightContent = m.renderScrollableContent(rightContentWrapped, m.height-6)
-	} else {
-		rightContent = rightContentWrapped
-	}
+	// ALWAYS apply right panel scroll offset to maintain independent position
+	rightContent := m.renderScrollableContentWithOffset(rightContentWrapped, m.height-6, m.rightPanelScrollOffset)
 
 	// Style right panel with STRICT width constraints
 	rightPanelStyle := lipgloss.NewStyle().
