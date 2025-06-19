@@ -22,10 +22,22 @@ type AIConfig struct {
 	ConfirmBeforeDeploy bool   `yaml:"confirm_before_deploy"`
 }
 
+type TerraformConfig struct {
+	SourceFolder    string `yaml:"source_folder"`
+	DefaultLocation string `yaml:"default_location"`
+	AIProvider      string `yaml:"ai_provider"`
+	AutoFormat      bool   `yaml:"auto_format"`
+	ValidateOnSave  bool   `yaml:"validate_on_save"`
+	StateBackend    string `yaml:"state_backend"`
+	AutoInit        bool   `yaml:"auto_init"`
+	ConfirmDestroy  bool   `yaml:"confirm_destroy"`
+}
+
 type AppConfig struct {
-	Naming NamingConfig `yaml:"naming"`
-	Env    string       `yaml:"env"`
-	AI     AIConfig     `yaml:"ai"`
+	Naming    NamingConfig    `yaml:"naming"`
+	Env       string          `yaml:"env"`
+	AI        AIConfig        `yaml:"ai"`
+	Terraform TerraformConfig `yaml:"terraform"`
 }
 
 var loadedConfig *AppConfig
@@ -76,4 +88,62 @@ func GetNamingStandard(resourceType string) string {
 		return cfg.Naming.Default
 	}
 	return "{{env}}-{{type}}-{{name}}"
+}
+
+func GetTerraformConfig() (*TerraformConfig, error) {
+	cfg, err := LoadConfig()
+	if err != nil {
+		// Return default config if no config file exists
+		return &TerraformConfig{
+			SourceFolder:    "./terraform",
+			DefaultLocation: "uksouth",
+			AIProvider:      "openai",
+			AutoFormat:      true,
+			ValidateOnSave:  true,
+			StateBackend:    "local",
+			AutoInit:        true,
+			ConfirmDestroy:  true,
+		}, nil
+	}
+	return &cfg.Terraform, nil
+}
+
+func GetTerraformSourceFolder() string {
+	cfg, err := GetTerraformConfig()
+	if err != nil || cfg.SourceFolder == "" {
+		return "./terraform"
+	}
+	return cfg.SourceFolder
+}
+
+func GetDefaultLocation() string {
+	cfg, err := GetTerraformConfig()
+	if err != nil || cfg.DefaultLocation == "" {
+		return "uksouth"
+	}
+	return cfg.DefaultLocation
+}
+
+func SaveConfig(cfg *AppConfig) error {
+	configDir := filepath.Join(os.Getenv("HOME"), ".config", "azure-tui")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		return fmt.Errorf("failed to create config directory: %w", err)
+	}
+
+	configPath := filepath.Join(configDir, "config.yaml")
+	f, err := os.Create(configPath)
+	if err != nil {
+		return fmt.Errorf("failed to create config file: %w", err)
+	}
+	defer f.Close()
+
+	encoder := yaml.NewEncoder(f)
+	defer encoder.Close()
+
+	if err := encoder.Encode(cfg); err != nil {
+		return fmt.Errorf("failed to encode config: %w", err)
+	}
+
+	loadedConfig = cfg // Update the loaded config cache
+	return nil
 }

@@ -227,8 +227,46 @@ func (ai *AIProvider) SuggestCostOptimizations(resources []string, resourceDetai
 	return ai.Ask(prompt, "Azure Cost Optimization")
 }
 
-// GenerateTerraformCode generates Terraform code for a resource based on requirements
-func (ai *AIProvider) GenerateTerraformCode(resourceType, requirements string) (string, error) {
+// GenerateTerraformCode generates Terraform code using AI with enhanced capabilities
+func (ai *AIProvider) GenerateTerraformCode(req TerraformRequest) (*TerraformResponse, error) {
+	if ai.Client == nil {
+		return nil, fmt.Errorf("AI client not initialized")
+	}
+
+	prompt := ai.buildTerraformPrompt(req)
+
+	chatReq := openai.ChatCompletionRequest{
+		Model: ai.getModel(),
+		Messages: []openai.ChatCompletionMessage{
+			{
+				Role:    openai.ChatMessageRoleSystem,
+				Content: ai.getTerraformSystemPrompt(),
+			},
+			{
+				Role:    openai.ChatMessageRoleUser,
+				Content: prompt,
+			},
+		},
+		MaxTokens:   2000,
+		Temperature: 0.1, // Low temperature for more consistent code generation
+		TopP:        0.95,
+	}
+
+	resp, err := ai.Client.CreateChatCompletion(context.Background(), chatReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate Terraform code: %w", err)
+	}
+
+	if len(resp.Choices) == 0 {
+		return nil, fmt.Errorf("no response from AI provider")
+	}
+
+	content := resp.Choices[0].Message.Content
+	return ai.parseTerraformResponse(content), nil
+}
+
+// GenerateTerraformCodeSimple generates simple Terraform code (legacy function for compatibility)
+func (ai *AIProvider) GenerateTerraformCodeSimple(resourceType, requirements string) (string, error) {
 	prompt := fmt.Sprintf("Generate Terraform code for an Azure %s with these requirements:\n%s\n\nProvide:\n1. Complete .tf file content\n2. Required variables\n3. Output values\n4. Brief usage explanation",
 		resourceType, requirements)
 	return ai.Ask(prompt, "Terraform Code Generation")
