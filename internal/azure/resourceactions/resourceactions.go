@@ -154,6 +154,7 @@ func ExecuteVMSSH(vmName, resourceGroup, username string) ActionResult {
 	}
 
 	// Check if SSH key authentication is available
+	var keyAuthEnabled bool
 	sshKeyCmd := exec.Command("az", "vm", "show",
 		"--name", vmName,
 		"--resource-group", resourceGroup,
@@ -161,7 +162,12 @@ func ExecuteVMSSH(vmName, resourceGroup, username string) ActionResult {
 		"--output", "tsv")
 
 	keyAuthOutput, err := sshKeyCmd.Output()
-	keyAuthEnabled := strings.TrimSpace(string(keyAuthOutput)) == "true"
+	if err != nil {
+		// If we can't determine key auth status, assume password auth
+		keyAuthEnabled = false
+	} else {
+		keyAuthEnabled = strings.TrimSpace(string(keyAuthOutput)) == "true"
+	}
 
 	// Prepare SSH command with appropriate options
 	var sshCmd *exec.Cmd

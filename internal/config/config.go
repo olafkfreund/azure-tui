@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -38,7 +39,12 @@ func LoadConfig() (*AppConfig, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer f.Close()
+	defer func() {
+		if closeErr := f.Close(); closeErr != nil {
+			// Log the error but don't override the main error
+			fmt.Printf("Warning: failed to close config file: %v\n", closeErr)
+		}
+	}()
 	var cfg AppConfig
 	if err := yaml.NewDecoder(f).Decode(&cfg); err != nil {
 		return nil, err

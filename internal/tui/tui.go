@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // This package will contain the Bubble Tea TUI logic and models.
@@ -504,9 +506,10 @@ func (sb *StatusBar) RenderStatusBar() string {
 func RenderPopup(msg PopupMsg) string {
 	style := lipgloss.NewStyle().Padding(1, 2)
 	title := msg.Title
-	if msg.Level == "error" {
+	switch msg.Level {
+	case "error":
 		title = "❌ " + title
-	} else if msg.Level == "alarm" {
+	case "alarm":
 		title = "⚠️  " + title
 	}
 	return style.Render(fmt.Sprintf("%s\n\n%s", title, msg.Content))
@@ -765,7 +768,8 @@ func RenderResourceActions(resourceType, resourceName string, actions []string) 
 		}
 
 		actionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
-		content.WriteString(fmt.Sprintf("%d. %s %s\n", i+1, icon, actionStyle.Render(strings.Title(action))))
+		titleCaser := cases.Title(language.English)
+		content.WriteString(fmt.Sprintf("%d. %s %s\n", i+1, icon, actionStyle.Render(titleCaser.String(action))))
 	}
 
 	content.WriteString("\n")
@@ -872,7 +876,8 @@ func RenderStructuredResourceDetails(details map[string]interface{}) string {
 		content.WriteString("\n")
 
 		for key, value := range sku {
-			content.WriteString(fmt.Sprintf("%s: %v\n", strings.Title(key), value))
+			titleCaser := cases.Title(language.English)
+			content.WriteString(fmt.Sprintf("%s: %v\n", titleCaser.String(key), value))
 		}
 	}
 
@@ -887,7 +892,8 @@ func RenderStructuredResourceDetails(details map[string]interface{}) string {
 		for _, prop := range importantProps {
 			if value, exists := properties[prop]; exists {
 				propStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
-				content.WriteString(fmt.Sprintf("%s: %s\n", propStyle.Render(strings.Title(prop)), fmt.Sprintf("%v", value)))
+				titleCaser := cases.Title(language.English)
+				content.WriteString(fmt.Sprintf("%s: %s\n", propStyle.Render(titleCaser.String(prop)), fmt.Sprintf("%v", value)))
 			}
 		}
 	}
@@ -1057,7 +1063,8 @@ func RenderAKSDetails(clusterName string, aksDetails map[string]interface{}) str
 			if status != "Running" {
 				statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
 			}
-			content.WriteString(fmt.Sprintf("%s: %s\n", statusStyle.Render(strings.Title(status)), fmt.Sprintf("%d", count)))
+			titleCaser := cases.Title(language.English)
+			content.WriteString(fmt.Sprintf("%s: %s\n", statusStyle.Render(titleCaser.String(status)), fmt.Sprintf("%d", count)))
 		}
 
 		content.WriteString("\nTop Namespaces:\n")

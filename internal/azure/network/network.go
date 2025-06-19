@@ -348,7 +348,7 @@ func ListVirtualNetworks() ([]VirtualNetwork, error) {
 	if err != nil {
 		// Return a more descriptive error
 		if exitError, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("Azure CLI error (exit code %d): %s", exitError.ExitCode(), string(exitError.Stderr))
+			return nil, fmt.Errorf("azure CLI error (exit code %d): %s", exitError.ExitCode(), string(exitError.Stderr))
 		}
 		return nil, fmt.Errorf("failed to execute Azure CLI command: %w", err)
 	}
@@ -464,7 +464,7 @@ func ListNetworkSecurityGroups() ([]NetworkSecurityGroup, error) {
 	out, err := cmd.Output()
 	if err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("Azure CLI error listing NSGs (exit code %d): %s", exitError.ExitCode(), string(exitError.Stderr))
+			return nil, fmt.Errorf("azure CLI error listing NSGs (exit code %d): %s", exitError.ExitCode(), string(exitError.Stderr))
 		}
 		return nil, fmt.Errorf("failed to execute Azure CLI command for NSGs: %w", err)
 	}
@@ -534,7 +534,7 @@ func ListRouteTables() ([]RouteTable, error) {
 	out, err := cmd.Output()
 	if err != nil {
 		if exitError, ok := err.(*exec.ExitError); ok {
-			return nil, fmt.Errorf("Azure CLI error listing route tables (exit code %d): %s", exitError.ExitCode(), string(exitError.Stderr))
+			return nil, fmt.Errorf("azure CLI error listing route tables (exit code %d): %s", exitError.ExitCode(), string(exitError.Stderr))
 		}
 		return nil, fmt.Errorf("failed to execute Azure CLI command for route tables: %w", err)
 	}
@@ -1276,7 +1276,7 @@ func generateOpenPortsTable(openPorts []OpenPortInfo) string {
 			table.WriteString(fmt.Sprintf("%-6s %-10s %-20s %-20s %-10d %-25s\n",
 				portStyle.Render(fmt.Sprintf("%d", port.Port)),
 				port.Protocol,
-				truncateString(source, 18),
+				sourceStyle.Render(truncateString(source, 18)),
 				truncateString(port.RuleName, 18),
 				port.Priority,
 				port.Description))
@@ -1522,7 +1522,7 @@ Network Security Analysis:
 	}
 
 	// Add topology information
-	summary += fmt.Sprintf("\nNetwork Topology:\n")
+	summary += "\nNetwork Topology:\n"
 	for _, peering := range dashboard.Topology.PeeringStatus {
 		summary += fmt.Sprintf("Peering: %s <-> %s (%s)\n", peering.VNetName, peering.PeerVNetName, peering.PeeringState)
 	}

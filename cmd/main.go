@@ -1211,12 +1211,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		case "ctrl+k", "ctrl+up":
 			// Dedicated scrolling up for current panel
-			if m.selectedPanel == 0 {
+			switch m.selectedPanel {
+			case 0:
 				// Left panel scrolling up
 				if m.leftPanelScrollOffset > 0 {
 					m.leftPanelScrollOffset--
 				}
-			} else if m.selectedPanel == 1 {
+			case 1:
 				// Right panel scrolling up
 				if m.rightPanelScrollOffset > 0 {
 					m.rightPanelScrollOffset--
@@ -1490,8 +1491,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				// Try to go back to previous view
 				if !m.popView() {
-					// If no previous view, stay on current view
-					// Could optionally set to welcome view here
+					// If no previous view, stay on current view - no action needed
 				}
 			}
 		}
@@ -1593,7 +1593,7 @@ func (m model) View() string {
 			Foreground(fgLight).
 			Bold(true)
 		// Add enhanced active panel indicator
-		treeContent = "🔍 " + strings.Replace(treeContent, "\n", "\n   ", -1)
+		treeContent = "🔍 " + strings.ReplaceAll(treeContent, "\n", "\n   ")
 	}
 
 	leftPanel := leftPanelStyle.Render(treeContent)
@@ -1619,7 +1619,7 @@ func (m model) View() string {
 			Foreground(fgLight).
 			Bold(true)
 		// Add enhanced active panel marker
-		rightContent = "📊 " + strings.Replace(rightContent, "\n", "\n   ", -1)
+		rightContent = "📊 " + strings.ReplaceAll(rightContent, "\n", "\n   ")
 	}
 
 	rightPanel := rightPanelStyle.Render(rightContent)
@@ -2606,7 +2606,7 @@ func createShortcutsMap() map[string]string {
 func main() {
 	m := initModel()
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
-	if err := p.Start(); err != nil {
+	if _, err := p.Run(); err != nil {
 		fmt.Printf("Error starting Azure Dashboard: %v\n", err)
 	}
 }
