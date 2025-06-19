@@ -13,9 +13,11 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/olafkfreund/azure-tui/internal/azure/aci"
+	"github.com/olafkfreund/azure-tui/internal/azure/keyvault"
 	"github.com/olafkfreund/azure-tui/internal/azure/network"
 	"github.com/olafkfreund/azure-tui/internal/azure/resourceactions"
 	"github.com/olafkfreund/azure-tui/internal/azure/resourcedetails"
+	"github.com/olafkfreund/azure-tui/internal/azure/storage"
 	"github.com/olafkfreund/azure-tui/internal/openai"
 	"github.com/olafkfreund/azure-tui/internal/tui"
 )
@@ -104,6 +106,37 @@ type containerInstanceScaleMsg struct {
 	result resourceactions.ActionResult
 }
 
+// Key Vault message types
+type keyVaultSecretsMsg struct {
+	vaultName string
+	secrets   []keyvault.Secret
+}
+type keyVaultSecretDetailsMsg struct {
+	secret *keyvault.Secret
+}
+type keyVaultSecretActionMsg struct {
+	action string
+	result resourceactions.ActionResult
+}
+
+// Storage Account message types
+type storageContainersMsg struct {
+	accountName string
+	containers  []storage.Container
+}
+type storageBlobsMsg struct {
+	accountName   string
+	containerName string
+	blobs         []storage.Blob
+}
+type storageBlobDetailsMsg struct {
+	blob *storage.Blob
+}
+type storageActionMsg struct {
+	action string
+	result resourceactions.ActionResult
+}
+
 type model struct {
 	treeView               *tui.TreeView
 	statusBar              *tui.StatusBar
@@ -140,6 +173,22 @@ type model struct {
 	// Container Instance-specific content
 	containerInstanceDetailsContent string
 	containerInstanceLogsContent    string
+
+	// Key Vault-specific content
+	keyVaultSecretsContent       string
+	keyVaultSecretDetailsContent string
+	keyVaultSecrets              []keyvault.Secret
+	selectedSecret               *keyvault.Secret
+
+	// Storage Account-specific content
+	storageContainersContent  string
+	storageBlobsContent       string
+	storageBlobDetailsContent string
+	storageContainers         []storage.Container
+	storageBlobs              []storage.Blob
+	selectedBlob              *storage.Blob
+	currentStorageAccount     string
+	currentContainer          string
 
 	// Help popup state
 	showHelpPopup bool
@@ -575,6 +624,213 @@ func scaleContainerInstanceCmd(name, resourceGroup string, cpu, memory float64) 
 	}
 }
 
+// =============================================================================
+// KEY VAULT SECRET MANAGEMENT COMMANDS
+// =============================================================================
+
+// listKeyVaultSecretsCmd lists all secrets in a Key Vault
+func listKeyVaultSecretsCmd(vaultName string) tea.Cmd {
+	return func() tea.Msg {
+		secrets, err := keyvault.ListSecrets(vaultName)
+		if err != nil {
+			return errorMsg{error: fmt.Sprintf("Failed to list secrets: %v", err)}
+		}
+		return keyVaultSecretsMsg{vaultName: vaultName, secrets: secrets}
+	}
+}
+
+// showKeyVaultSecretDetailsCmd shows detailed information about a specific secret
+func showKeyVaultSecretDetailsCmd(vaultName, secretName string) tea.Cmd {
+	return func() tea.Msg {
+		secret, err := keyvault.GetSecretMetadata(vaultName, secretName)
+		if err != nil {
+			return errorMsg{error: fmt.Sprintf("Failed to get secret details: %v", err)}
+		}
+		return keyVaultSecretDetailsMsg{secret: secret}
+	}
+}
+
+// createKeyVaultSecretCmd creates a new secret in a Key Vault
+func createKeyVaultSecretCmd(vaultName, secretName, secretValue string, tags map[string]string) tea.Cmd {
+	return func() tea.Msg {
+		err := keyvault.CreateSecret(vaultName, secretName, secretValue, tags)
+		var result resourceactions.ActionResult
+
+		if err != nil {
+			result = resourceactions.ActionResult{
+				Success: false,
+				Message: fmt.Sprintf("Failed to create secret '%s': %v", secretName, err),
+				Output:  "",
+			}
+		} else {
+			result = resourceactions.ActionResult{
+				Success: true,
+				Message: fmt.Sprintf("Successfully created secret '%s' in Key Vault '%s'", secretName, vaultName),
+				Output:  fmt.Sprintf("Secret '%s' is now available in Key Vault", secretName),
+			}
+		}
+
+		return keyVaultSecretActionMsg{action: "create", result: result}
+	}
+}
+
+// deleteKeyVaultSecretCmd deletes a secret from a Key Vault
+func deleteKeyVaultSecretCmd(vaultName, secretName string) tea.Cmd {
+	return func() tea.Msg {
+		err := keyvault.DeleteSecret(vaultName, secretName)
+		var result resourceactions.ActionResult
+
+		if err != nil {
+			result = resourceactions.ActionResult{
+				Success: false,
+				Message: fmt.Sprintf("Failed to delete secret '%s': %v", secretName, err),
+				Output:  "",
+			}
+		} else {
+			result = resourceactions.ActionResult{
+				Success: true,
+				Message: fmt.Sprintf("Successfully deleted secret '%s' from Key Vault '%s'", secretName, vaultName),
+				Output:  fmt.Sprintf("Secret '%s' has been removed from Key Vault", secretName),
+			}
+		}
+
+		return keyVaultSecretActionMsg{action: "delete", result: result}
+	}
+}
+
+// =============================================================================
+// STORAGE ACCOUNT MANAGEMENT COMMANDS
+// =============================================================================
+
+// listStorageContainersCmd lists all containers in a storage account
+func listStorageContainersCmd(accountName string) tea.Cmd {
+	return func() tea.Msg {
+		containers, err := storage.ListContainers(accountName)
+		if err != nil {
+			return errorMsg{error: fmt.Sprintf("Failed to list containers: %v", err)}
+		}
+		return storageContainersMsg{accountName: accountName, containers: containers}
+	}
+}
+
+// listStorageBlobsCmd lists all blobs in a container
+func listStorageBlobsCmd(accountName, containerName string) tea.Cmd {
+	return func() tea.Msg {
+		blobs, err := storage.ListBlobs(accountName, containerName)
+		if err != nil {
+			return errorMsg{error: fmt.Sprintf("Failed to list blobs: %v", err)}
+		}
+		return storageBlobsMsg{accountName: accountName, containerName: containerName, blobs: blobs}
+	}
+}
+
+// showBlobDetailsCmd shows detailed information about a specific blob
+func showBlobDetailsCmd(accountName, containerName, blobName string) tea.Cmd {
+	return func() tea.Msg {
+		blob, err := storage.GetBlobProperties(accountName, containerName, blobName)
+		if err != nil {
+			return errorMsg{error: fmt.Sprintf("Failed to get blob details: %v", err)}
+		}
+		return storageBlobDetailsMsg{blob: blob}
+	}
+}
+
+// createStorageContainerCmd creates a new container in a storage account
+func createStorageContainerCmd(accountName, containerName string) tea.Cmd {
+	return func() tea.Msg {
+		err := storage.CreateContainer(accountName, containerName)
+		var result resourceactions.ActionResult
+
+		if err != nil {
+			result = resourceactions.ActionResult{
+				Success: false,
+				Message: fmt.Sprintf("Failed to create container '%s': %v", containerName, err),
+				Output:  "",
+			}
+		} else {
+			result = resourceactions.ActionResult{
+				Success: true,
+				Message: fmt.Sprintf("Successfully created container '%s' in storage account '%s'", containerName, accountName),
+				Output:  fmt.Sprintf("Container '%s' is now available in storage account", containerName),
+			}
+		}
+
+		return storageActionMsg{action: "create-container", result: result}
+	}
+}
+
+// deleteStorageContainerCmd deletes a container from a storage account
+func deleteStorageContainerCmd(accountName, containerName string) tea.Cmd {
+	return func() tea.Msg {
+		err := storage.DeleteContainer(accountName, containerName)
+		var result resourceactions.ActionResult
+
+		if err != nil {
+			result = resourceactions.ActionResult{
+				Success: false,
+				Message: fmt.Sprintf("Failed to delete container '%s': %v", containerName, err),
+				Output:  "",
+			}
+		} else {
+			result = resourceactions.ActionResult{
+				Success: true,
+				Message: fmt.Sprintf("Successfully deleted container '%s' from storage account '%s'", containerName, accountName),
+				Output:  fmt.Sprintf("Container '%s' has been removed from storage account", containerName),
+			}
+		}
+
+		return storageActionMsg{action: "delete-container", result: result}
+	}
+}
+
+// uploadBlobCmd uploads a file to a blob container
+func uploadBlobCmd(accountName, containerName, blobName, filePath string) tea.Cmd {
+	return func() tea.Msg {
+		err := storage.UploadBlob(accountName, containerName, blobName, filePath)
+		var result resourceactions.ActionResult
+
+		if err != nil {
+			result = resourceactions.ActionResult{
+				Success: false,
+				Message: fmt.Sprintf("Failed to upload blob '%s': %v", blobName, err),
+				Output:  "",
+			}
+		} else {
+			result = resourceactions.ActionResult{
+				Success: true,
+				Message: fmt.Sprintf("Successfully uploaded blob '%s' to container '%s'", blobName, containerName),
+				Output:  fmt.Sprintf("Blob '%s' is now available in container", blobName),
+			}
+		}
+
+		return storageActionMsg{action: "upload-blob", result: result}
+	}
+}
+
+// deleteBlobCmd deletes a blob from a container
+func deleteBlobCmd(accountName, containerName, blobName string) tea.Cmd {
+	return func() tea.Msg {
+		err := storage.DeleteBlob(accountName, containerName, blobName)
+		var result resourceactions.ActionResult
+
+		if err != nil {
+			result = resourceactions.ActionResult{
+				Success: false,
+				Message: fmt.Sprintf("Failed to delete blob '%s': %v", blobName, err),
+				Output:  "",
+			}
+		} else {
+			result = resourceactions.ActionResult{
+				Success: true,
+				Message: fmt.Sprintf("Successfully deleted blob '%s' from container '%s'", blobName, containerName),
+				Output:  fmt.Sprintf("Blob '%s' has been removed from container", blobName),
+			}
+		}
+
+		return storageActionMsg{action: "delete-blob", result: result}
+	}
+}
+
 // getContextualShortcuts returns relevant shortcuts based on the selected resource and current view
 func (m model) getContextualShortcuts() string {
 	var shortcuts []string
@@ -617,11 +873,13 @@ func (m model) getContextualShortcuts() string {
 
 		case "Microsoft.Storage/storageAccounts":
 			shortcuts = append(shortcuts, []string{
-				"d:Dashboard", "R:Refresh",
+				"T:List Containers", "Shift+T:Create Container", "B:List Blobs",
+				"U:Upload Blob", "Ctrl+X:Delete Item", "d:Dashboard", "R:Refresh",
 			}...)
 
 		case "Microsoft.KeyVault/vaults":
 			shortcuts = append(shortcuts, []string{
+				"K:List Secrets", "Shift+K:Create Secret", "Ctrl+D:Delete Secret",
 				"d:Dashboard", "R:Refresh",
 			}...)
 
@@ -783,6 +1041,64 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastActionResult = &msg.result
 		if msg.result.Success && m.selectedResource != nil {
 			return m, loadResourceDetailsCmd(*m.selectedResource)
+		}
+
+	case keyVaultSecretsMsg:
+		m.keyVaultSecrets = msg.secrets
+		m.keyVaultSecretsContent = fmt.Sprintf("Secrets in Vault '%s':\n", msg.vaultName)
+		for _, secret := range msg.secrets {
+			m.keyVaultSecretsContent += fmt.Sprintf("- %s\n", secret.Name)
+		}
+		m.pushView("keyvault-secrets")
+
+	case keyVaultSecretDetailsMsg:
+		m.selectedSecret = msg.secret
+		m.keyVaultSecretDetailsContent = keyvault.RenderSecretDetails(msg.secret)
+		m.pushView("keyvault-secret-details")
+
+	case keyVaultSecretActionMsg:
+		m.actionInProgress = false
+		m.lastActionResult = &msg.result
+		if msg.result.Success {
+			return m, listKeyVaultSecretsCmd(m.selectedResource.Name)
+		}
+
+	// Storage Account message handlers
+	case storageContainersMsg:
+		m.actionInProgress = false
+		m.storageContainers = msg.containers
+		m.currentStorageAccount = msg.accountName
+		m.storageContainersContent = storage.RenderStorageContainersView(msg.accountName, msg.containers)
+		m.pushView("storage-containers")
+
+	case storageBlobsMsg:
+		m.actionInProgress = false
+		m.storageBlobs = msg.blobs
+		m.currentContainer = msg.containerName
+		m.storageBlobsContent = storage.RenderStorageBlobsView(msg.accountName, msg.containerName, msg.blobs)
+		m.pushView("storage-blobs")
+
+	case storageBlobDetailsMsg:
+		m.actionInProgress = false
+		m.selectedBlob = msg.blob
+		m.storageBlobDetailsContent = storage.RenderBlobDetails(msg.blob)
+		m.pushView("storage-blob-details")
+
+	case storageActionMsg:
+		m.actionInProgress = false
+		m.lastActionResult = &msg.result
+		if msg.result.Success {
+			// Refresh the appropriate view based on the action
+			switch msg.action {
+			case "create-container", "delete-container":
+				if m.currentStorageAccount != "" {
+					return m, listStorageContainersCmd(m.currentStorageAccount)
+				}
+			case "upload-blob", "delete-blob":
+				if m.currentStorageAccount != "" && m.currentContainer != "" {
+					return m, listStorageBlobsCmd(m.currentStorageAccount, m.currentContainer)
+				}
+			}
 		}
 
 	case errorMsg:
@@ -993,6 +1309,13 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, showNetworkAIAnalysisCmd()
 			}
 		case "C":
+			// Key Vault: Create secret (with demo values for now)
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.KeyVault/vaults" {
+				m.actionInProgress = true
+				// For demo purposes, create a secret with sample name and value
+				// In a real implementation, this would open a form dialog
+				return m, createKeyVaultSecretCmd(m.selectedResource.Name, "demo-secret", "demo-value", map[string]string{"created-by": "azure-tui"})
+			}
 			// Create VNet action for network resources
 			if !m.actionInProgress {
 				m.actionInProgress = true
@@ -1055,6 +1378,80 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.actionInProgress = true
 				return m, showContainerInstanceDetailsCmd(m.selectedResource.Name, m.selectedResource.ResourceGroup)
 			}
+
+		// Key Vault Management Actions
+		case "K":
+			// List Key Vault secrets
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.KeyVault/vaults" {
+				m.actionInProgress = true
+				return m, listKeyVaultSecretsCmd(m.selectedResource.Name)
+			}
+		case "shift+k":
+			// Create Key Vault secret
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.KeyVault/vaults" {
+				m.actionInProgress = true
+				// For demo purposes, create a secret with sample name and value
+				// In a real implementation, this would open a form dialog
+				return m, createKeyVaultSecretCmd(m.selectedResource.Name, "demo-secret", "demo-value", map[string]string{"created-by": "azure-tui"})
+			}
+		case "ctrl+d":
+			// Delete Key Vault secret (demo - would need secret selection in real implementation)
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.KeyVault/vaults" {
+				m.actionInProgress = true
+				// For demo purposes, delete a known secret name
+				// In a real implementation, this would show a list to select from
+				return m, deleteKeyVaultSecretCmd(m.selectedResource.Name, "demo-secret")
+			}
+
+		// Storage Account Management Actions
+		case "T":
+			// List Storage Containers (using T for sTroage containers)
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.Storage/storageAccounts" {
+				m.actionInProgress = true
+				return m, listStorageContainersCmd(m.selectedResource.Name)
+			}
+		case "shift+t":
+			// Create Storage Container
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.Storage/storageAccounts" {
+				m.actionInProgress = true
+				// For demo purposes, create a container with a sample name
+				// In a real implementation, this would open a form dialog
+				return m, createStorageContainerCmd(m.selectedResource.Name, "demo-container")
+			}
+		case "B":
+			// List Blobs in Container (only available when viewing containers)
+			if m.selectedResource != nil && !m.actionInProgress &&
+				m.selectedResource.Type == "Microsoft.Storage/storageAccounts" &&
+				m.activeView == "storage-containers" && len(m.storageContainers) > 0 {
+				m.actionInProgress = true
+				// For demo purposes, use the first container
+				// In a real implementation, this would allow container selection
+				containerName := m.storageContainers[0].Name
+				return m, listStorageBlobsCmd(m.selectedResource.Name, containerName)
+			}
+		case "U":
+			// Upload Blob (only available when viewing blobs)
+			if m.selectedResource != nil && !m.actionInProgress &&
+				m.selectedResource.Type == "Microsoft.Storage/storageAccounts" &&
+				m.activeView == "storage-blobs" && m.currentContainer != "" {
+				m.actionInProgress = true
+				// For demo purposes, simulate uploading a file
+				// In a real implementation, this would open a file dialog
+				return m, uploadBlobCmd(m.selectedResource.Name, m.currentContainer, "demo-blob.txt", "/tmp/demo-file.txt")
+			}
+		case "ctrl+x":
+			// Delete Storage Item (Container or Blob depending on current view)
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.Storage/storageAccounts" {
+				m.actionInProgress = true
+				if m.activeView == "storage-containers" && len(m.storageContainers) > 0 {
+					// Delete first container for demo
+					return m, deleteStorageContainerCmd(m.selectedResource.Name, m.storageContainers[0].Name)
+				} else if m.activeView == "storage-blobs" && len(m.storageBlobs) > 0 && m.currentContainer != "" {
+					// Delete first blob for demo
+					return m, deleteBlobCmd(m.selectedResource.Name, m.currentContainer, m.storageBlobs[0].Name)
+				}
+			}
+
 		case "R":
 			return m, loadDataCmd()
 		case "?":
@@ -1262,6 +1659,12 @@ func (m model) View() string {
 		helpContent.WriteString("n          List Nodes (AKS)\n")
 		helpContent.WriteString("v          List Services (AKS)\n\n")
 
+		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGray).Render("🔑 Key Vault Management:"))
+		helpContent.WriteString("\n")
+		helpContent.WriteString("K          List Secrets\n")
+		helpContent.WriteString("Shift+K    Create Secret\n")
+		helpContent.WriteString("Ctrl+D     Delete Secret\n\n")
+
 		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGray).Render("🎮 Interface:"))
 		helpContent.WriteString("\n")
 		helpContent.WriteString("?          Show/hide this help\n")
@@ -1306,6 +1709,16 @@ func (m model) renderResourcePanel(width, height int) string {
 		return m.containerInstanceDetailsContent
 	case "container-logs":
 		return m.containerInstanceLogsContent
+	case "keyvault-secrets":
+		return m.keyVaultSecretsContent
+	case "keyvault-secret-details":
+		return m.keyVaultSecretDetailsContent
+	case "storage-containers":
+		return m.storageContainersContent
+	case "storage-blobs":
+		return m.storageBlobsContent
+	case "storage-blob-details":
+		return m.storageBlobDetailsContent
 	}
 
 	// Handle regular resource views
@@ -1507,6 +1920,70 @@ func (m model) renderEnhancedResourceDetails(width, height int) string {
 		content.WriteString(fmt.Sprintf("%s Attach to Container\n", actionStyle.Render("[a]")))
 		content.WriteString(fmt.Sprintf("%s Scale Container Resources\n", actionStyle.Render("[u]")))
 		content.WriteString(fmt.Sprintf("%s Show Detailed Info\n", actionStyle.Render("[I]")))
+
+		if m.actionInProgress {
+			progressStyle := lipgloss.NewStyle().Foreground(colorYellow)
+			content.WriteString("\n")
+			content.WriteString(progressStyle.Render("⏳ Action in progress..."))
+			content.WriteString("\n")
+		}
+
+		if m.lastActionResult != nil {
+			resultStyle := lipgloss.NewStyle().Foreground(colorRed)
+			icon := "❌"
+			if m.lastActionResult.Success {
+				resultStyle = lipgloss.NewStyle().Foreground(colorGreen)
+				icon = "✅"
+			}
+			content.WriteString("\n")
+			content.WriteString(fmt.Sprintf("%s %s", icon, resultStyle.Render(m.lastActionResult.Message)))
+			content.WriteString("\n")
+		}
+	}
+
+	// Actions Section for Key Vaults
+	if resource.Type == "Microsoft.KeyVault/vaults" {
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("🔑 Key Vault Management"))
+		content.WriteString("\n")
+
+		actionStyle := lipgloss.NewStyle().Foreground(colorBlue)
+		content.WriteString(fmt.Sprintf("%s List Secrets\n", actionStyle.Render("[K]")))
+		content.WriteString(fmt.Sprintf("%s Create Secret\n", actionStyle.Render("[Shift+K]")))
+		content.WriteString(fmt.Sprintf("%s Delete Secret\n", actionStyle.Render("[Ctrl+D]")))
+
+		if m.actionInProgress {
+			progressStyle := lipgloss.NewStyle().Foreground(colorYellow)
+			content.WriteString("\n")
+			content.WriteString(progressStyle.Render("⏳ Action in progress..."))
+			content.WriteString("\n")
+		}
+
+		if m.lastActionResult != nil {
+			resultStyle := lipgloss.NewStyle().Foreground(colorRed)
+			icon := "❌"
+			if m.lastActionResult.Success {
+				resultStyle = lipgloss.NewStyle().Foreground(colorGreen)
+				icon = "✅"
+			}
+			content.WriteString("\n")
+			content.WriteString(fmt.Sprintf("%s %s", icon, resultStyle.Render(m.lastActionResult.Message)))
+			content.WriteString("\n")
+		}
+	}
+
+	// Actions Section for Storage Accounts
+	if resource.Type == "Microsoft.Storage/storageAccounts" {
+		content.WriteString("\n")
+		content.WriteString(sectionStyle.Render("💾 Storage Management"))
+		content.WriteString("\n")
+
+		actionStyle := lipgloss.NewStyle().Foreground(colorBlue)
+		content.WriteString(fmt.Sprintf("%s List Containers\n", actionStyle.Render("[T]")))
+		content.WriteString(fmt.Sprintf("%s Create Container\n", actionStyle.Render("[Shift+T]")))
+		content.WriteString(fmt.Sprintf("%s List Blobs\n", actionStyle.Render("[B]")))
+		content.WriteString(fmt.Sprintf("%s Upload Blob\n", actionStyle.Render("[U]")))
+		content.WriteString(fmt.Sprintf("%s Delete Storage Item\n", actionStyle.Render("[Ctrl+X]")))
 
 		if m.actionInProgress {
 			progressStyle := lipgloss.NewStyle().Foreground(colorYellow)
@@ -2087,6 +2564,11 @@ func createShortcutsMap() map[string]string {
 		"D": "List Deployments (AKS)",
 		"n": "List Nodes (AKS)",
 		"v": "List Services (AKS)",
+
+		// Key Vault Management
+		"K":       "List Secrets (Key Vault)",
+		"shift+k": "Create Secret (Key Vault)",
+		"ctrl+d":  "Delete Secret (Key Vault)",
 
 		// Interface
 		"?":   "Show/hide this help",

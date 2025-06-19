@@ -48,6 +48,7 @@ A modern, **NeoVim-style Terminal User Interface** for managing Azure resources 
 - **📊 Table-Formatted Properties**: Resource properties displayed in organized tables with intelligent formatting
 - **🔐 Enhanced SSH for VMs**: Direct SSH (`c`) and Bastion (`b`) connections with automatic IP detection
 - **🚢 Comprehensive AKS Management**: Full kubectl integration with pod (`p`), deployment (`D`), node (`n`), and service (`v`) management
+- **💾 Storage Account Management**: Complete container and blob management with upload (`U`), list (`T`), and delete (`Ctrl+X`) operations
 - **⚡ Real-time Actions**: Start (`s`), stop (`S`), restart (`r`) operations with visual feedback
 - **🎮 Intuitive Controls**: Enhanced keyboard shortcuts and visual indicators for all operations
 
