@@ -1,0 +1,45 @@
+# Azure TUI Configuration File
+# This file contains configuration settings for the Azure TUI application
+
+# Environment settings
+env: "dev"
+
+# Naming conventions for Azure resources
+naming:
+  vm: "{{env}}-vm-{{name}}"
+  storage: "{{env}}st{{name}}"
+  vnet: "{{env}}-vnet-{{name}}"
+  default: "{{env}}-{{type}}-{{name}}"
+
+# AI provider configuration
+ai:
+  provider: "openai"
+  model: "gpt-4"
+  confirm_before_write: true
+  confirm_before_deploy: true
+
+# Terraform integration settings
+terraform:
+  # Path to Terraform source files
+  source_folder: "./terraform"
+  
+  # Default Azure region for resources
+  default_location: "uksouth"
+  
+  # AI provider for Terraform code generation
+  ai_provider: "openai"
+  
+  # Automatically format Terraform files after editing
+  auto_format: true
+  
+  # Validate Terraform files when saving
+  validate_on_save: true
+  
+  # State backend configuration ("local", "azurerm", "s3")
+  state_backend: "local"
+  
+  # Automatically run terraform init when needed
+  auto_init: true
+  
+  # Confirm before destroying resources
+  confirm_destroy: true

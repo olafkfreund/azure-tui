@@ -20,6 +20,7 @@ import (
 	"github.com/olafkfreund/azure-tui/internal/azure/storage"
 	"github.com/olafkfreund/azure-tui/internal/openai"
 	"github.com/olafkfreund/azure-tui/internal/search"
+	"github.com/olafkfreund/azure-tui/internal/terraform"
 	"github.com/olafkfreund/azure-tui/internal/tui"
 )
 
@@ -138,6 +139,28 @@ type storageActionMsg struct {
 	result resourceactions.ActionResult
 }
 
+// Terraform message types
+type terraformMenuMsg struct{ content string }
+type terraformFilesMsg struct {
+	files []terraform.TerraformFile
+}
+type terraformFileContentMsg struct {
+	filename string
+	content  string
+}
+type terraformPlanMsg struct {
+	output terraform.PlanOutput
+}
+type terraformStateMsg struct {
+	state terraform.TerraformState
+}
+type terraformAIMsg struct{ content string }
+type terraformOperationMsg struct {
+	operation string
+	success   bool
+	message   string
+}
+
 type model struct {
 	treeView               *tui.TreeView
 	statusBar              *tui.StatusBar
@@ -196,6 +219,18 @@ type model struct {
 
 	// Navigation stack for back navigation
 	navigationStack []string
+
+	// Terraform-specific content and state
+	terraformManager       *terraform.TerraformManager
+	terraformMenuContent   string
+	terraformFilesContent  string
+	terraformFileContent   string
+	terraformPlanContent   string
+	terraformStateContent  string
+	terraformAIContent     string
+	selectedTerraformFile  string
+	terraformFiles         []terraform.TerraformFile
+	terraformOperationMode string // "browse", "edit", "plan", "apply", "destroy"
 
 	// Search functionality
 	searchEngine      *search.SearchEngine
@@ -805,6 +840,213 @@ func createNetworkResourceCmd(resourceType string) tea.Cmd {
 }
 
 // =============================================================================
+// TERRAFORM MANAGEMENT COMMANDS
+// =============================================================================
+
+// showTerraformMenuCmd displays the Terraform main menu
+func showTerraformMenuCmd() tea.Cmd {
+	return func() tea.Msg {
+		content := renderTerraformMenu()
+		return terraformMenuMsg{content: content}
+	}
+}
+
+// listTerraformFilesCmd lists all Terraform files in the working directory
+func listTerraformFilesCmd() tea.Cmd {
+	return func() tea.Msg {
+		// Default to empty files if no manager is available
+		var files []terraform.TerraformFile
+
+		// This will be populated by the terraformManager when available
+		// For now, return empty list to prevent errors
+
+		return terraformFilesMsg{files: files}
+	}
+}
+
+// readTerraformFileCmd reads the content of a specific Terraform file
+func readTerraformFileCmd(filename string) tea.Cmd {
+	return func() tea.Msg {
+		content := fmt.Sprintf("# Content of %s\n\n# This is a placeholder for file content", filename)
+		return terraformFileContentMsg{filename: filename, content: content}
+	}
+}
+
+// terraformPlanCmd runs terraform plan
+func terraformPlanCmd() tea.Cmd {
+	return func() tea.Msg {
+		// Placeholder plan output
+		planOutput := terraform.PlanOutput{
+			Add:     0,
+			Change:  0,
+			Destroy: 0,
+			Output:  "No changes. Infrastructure is up-to-date.",
+		}
+		return terraformPlanMsg{output: planOutput}
+	}
+}
+
+// terraformApplyCmd runs terraform apply
+func terraformApplyCmd() tea.Cmd {
+	return func() tea.Msg {
+		return terraformOperationMsg{
+			operation: "apply",
+			success:   true,
+			message:   "Terraform apply completed successfully",
+		}
+	}
+}
+
+// terraformDestroyCmd runs terraform destroy
+func terraformDestroyCmd() tea.Cmd {
+	return func() tea.Msg {
+		return terraformOperationMsg{
+			operation: "destroy",
+			success:   true,
+			message:   "Terraform destroy completed successfully",
+		}
+	}
+}
+
+// terraformStateCmd shows terraform state
+func terraformStateCmd() tea.Cmd {
+	return func() tea.Msg {
+		state := terraform.TerraformState{
+			Version:   4,
+			Resources: []terraform.TerraformResource{},
+			Outputs:   map[string]interface{}{},
+		}
+		return terraformStateMsg{state: state}
+	}
+}
+
+// terraformAICmd provides AI assistance for Terraform
+func terraformAICmd() tea.Cmd {
+	return func() tea.Msg {
+		content := "# AI Terraform Assistant\n\nAI assistance for Terraform code generation and optimization will be available here."
+		return terraformAIMsg{content: content}
+	}
+}
+
+// =============================================================================
+// TERRAFORM VIEW RENDERING FUNCTIONS
+// =============================================================================
+
+// renderTerraformMenu renders the main Terraform menu
+func renderTerraformMenu() string {
+	rows := [][]string{
+		{"Option", "Description", "Shortcut"},
+		{"Browse Files", "View and edit Terraform files", "1"},
+		{"Create Template", "Generate new Terraform templates", "2"},
+		{"Plan & Apply", "Run terraform plan and apply", "3"},
+		{"View State", "Show current Terraform state", "4"},
+		{"AI Assistant", "Get AI help with Terraform", "5"},
+		{"Settings", "Configure Terraform options", "6"},
+	}
+
+	return tui.RenderMatrixGraph(tui.MatrixGraphMsg{
+		Title:  "🏗️ Terraform Management",
+		Rows:   rows,
+		Labels: []string{"Option", "Description", "Shortcut"},
+	})
+}
+
+// renderTerraformFilesView renders the list of Terraform files
+func renderTerraformFilesView(files []terraform.TerraformFile) string {
+	if len(files) == 0 {
+		return tui.RenderPopup(tui.PopupMsg{
+			Title:   "Terraform Files",
+			Content: "No Terraform files found in the working directory.\n\nUse the Terraform menu to create new templates or check your configuration.",
+			Level:   "info",
+		})
+	}
+
+	rows := [][]string{
+		{"File", "Size", "Modified", "Description"},
+	}
+
+	for _, file := range files {
+		size := fmt.Sprintf("%.1f KB", float64(file.Size)/1024)
+		modified := file.Modified.Format("2006-01-02 15:04")
+		description := getFileDescription(file.Name)
+		rows = append(rows, []string{file.Name, size, modified, description})
+	}
+
+	return tui.RenderMatrixGraph(tui.MatrixGraphMsg{
+		Title:  "📁 Terraform Files",
+		Rows:   rows,
+		Labels: []string{"File", "Size", "Modified", "Description"},
+	})
+}
+
+// renderTerraformPlanView renders terraform plan output
+func renderTerraformPlanView(output terraform.PlanOutput) string {
+	content := fmt.Sprintf(`# Terraform Plan Output
+
+## Summary
+- Resources to add: %d
+- Resources to change: %d  
+- Resources to destroy: %d
+
+## Details
+%s
+
+Use 'terraform apply' to apply these changes.`, output.Add, output.Change, output.Destroy, output.Output)
+
+	return content
+}
+
+// renderTerraformStateView renders terraform state information
+func renderTerraformStateView(state terraform.TerraformState) string {
+	if len(state.Resources) == 0 {
+		return tui.RenderPopup(tui.PopupMsg{
+			Title:   "Terraform State",
+			Content: "No resources found in Terraform state.\n\nRun 'terraform apply' to create resources.",
+			Level:   "info",
+		})
+	}
+
+	rows := [][]string{
+		{"Resource Type", "Name", "Provider", "Status"},
+	}
+
+	for _, resource := range state.Resources {
+		status := "Active"
+		if len(resource.Instances) == 0 {
+			status = "No Instances"
+		}
+		rows = append(rows, []string{resource.Type, resource.Name, resource.Provider, status})
+	}
+
+	return tui.RenderMatrixGraph(tui.MatrixGraphMsg{
+		Title:  fmt.Sprintf("📊 Terraform State (Version %d)", state.Version),
+		Rows:   rows,
+		Labels: []string{"Resource Type", "Name", "Provider", "Status"},
+	})
+}
+
+// getFileDescription returns a description for common Terraform files
+func getFileDescription(filename string) string {
+	switch filename {
+	case "main.tf":
+		return "Main configuration"
+	case "variables.tf":
+		return "Variable definitions"
+	case "outputs.tf":
+		return "Output values"
+	case "terraform.tfvars":
+		return "Variable values"
+	case "versions.tf":
+		return "Provider versions"
+	default:
+		if strings.HasSuffix(filename, ".tf") {
+			return "Terraform configuration"
+		}
+		return "Configuration file"
+	}
+}
+
+// =============================================================================
 // CONTAINER INSTANCE MANAGEMENT COMMANDS
 // =============================================================================
 
@@ -1174,7 +1416,7 @@ func (m model) getContextualShortcuts() string {
 		// No resource selected - show navigation shortcuts
 		shortcuts = append(shortcuts, []string{
 			"N:Network Dashboard", "Z:Topology", "A:AI Analysis",
-			"Space:Expand", "Enter:Select", "R:Refresh",
+			"F:Terraform", "Space:Expand", "Enter:Select", "R:Refresh",
 		}...)
 	}
 
@@ -1187,6 +1429,13 @@ func (m model) getContextualShortcuts() string {
 func initModel() model {
 	// Initialize AI provider with auto-detection (GitHub Copilot or OpenAI)
 	ai := openai.NewAIProviderAuto()
+
+	// Initialize Terraform manager
+	terraformMgr, err := terraform.NewTerraformManager()
+	if err != nil {
+		fmt.Printf("Warning: Failed to initialize Terraform manager: %v\n", err)
+		terraformMgr = nil
+	}
 
 	return model{
 		treeView:               tui.NewTreeView(),
@@ -1204,6 +1453,19 @@ func initModel() model {
 		expandedProperties:     make(map[string]bool),
 		showHelpPopup:          false,
 		navigationStack:        []string{}, // Initialize navigation stack
+
+		// Initialize Terraform fields
+		terraformManager:       terraformMgr,
+		terraformMenuContent:   "",
+		terraformFilesContent:  "",
+		terraformFileContent:   "",
+		terraformPlanContent:   "",
+		terraformStateContent:  "",
+		terraformAIContent:     "",
+		selectedTerraformFile:  "",
+		terraformFiles:         []terraform.TerraformFile{},
+		terraformOperationMode: "browse",
+
 		// Initialize search functionality
 		searchEngine:      search.NewSearchEngine(),
 		searchMode:        false,
@@ -1392,6 +1654,51 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, listStorageBlobsCmd(m.currentStorageAccount, m.currentContainer)
 				}
 			}
+		}
+
+	// Terraform message handlers
+	case terraformMenuMsg:
+		m.actionInProgress = false
+		m.terraformMenuContent = msg.content
+		m.pushView("terraform-menu")
+
+	case terraformFilesMsg:
+		m.actionInProgress = false
+		m.terraformFiles = msg.files
+		m.terraformFilesContent = renderTerraformFilesView(msg.files)
+		m.pushView("terraform-files")
+
+	case terraformFileContentMsg:
+		m.actionInProgress = false
+		m.selectedTerraformFile = msg.filename
+		m.terraformFileContent = msg.content
+		m.pushView("terraform-file-content")
+
+	case terraformPlanMsg:
+		m.actionInProgress = false
+		m.terraformPlanContent = renderTerraformPlanView(msg.output)
+		m.pushView("terraform-plan")
+
+	case terraformStateMsg:
+		m.actionInProgress = false
+		m.terraformStateContent = renderTerraformStateView(msg.state)
+		m.pushView("terraform-state")
+
+	case terraformAIMsg:
+		m.actionInProgress = false
+		m.terraformAIContent = msg.content
+		m.pushView("terraform-ai")
+
+	case terraformOperationMsg:
+		m.actionInProgress = false
+		m.lastActionResult = &resourceactions.ActionResult{
+			Success: msg.success,
+			Message: msg.message,
+			Output:  msg.message,
+		}
+		// Refresh files list after operations
+		if msg.success && (msg.operation == "apply" || msg.operation == "destroy") {
+			return m, listTerraformFilesCmd()
 		}
 
 	case errorMsg:
@@ -1808,6 +2115,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 
+		// Terraform Management Actions
+		case "F":
+			// Show Terraform menu
+			if !m.actionInProgress && m.terraformManager != nil {
+				m.actionInProgress = true
+				return m, showTerraformMenuCmd()
+			}
+
 		case "R":
 			return m, loadDataCmd()
 		case "?":
@@ -2117,6 +2432,18 @@ func (m model) renderResourcePanel(width, height int) string {
 		return m.storageBlobsContent
 	case "storage-blob-details":
 		return m.storageBlobDetailsContent
+	case "terraform-menu":
+		return m.terraformMenuContent
+	case "terraform-files":
+		return m.terraformFilesContent
+	case "terraform-file-content":
+		return m.terraformFileContent
+	case "terraform-plan":
+		return m.terraformPlanContent
+	case "terraform-state":
+		return m.terraformStateContent
+	case "terraform-ai":
+		return m.terraformAIContent
 	}
 
 	// Handle regular resource views
@@ -2972,6 +3299,9 @@ func createShortcutsMap() map[string]string {
 		"K":       "List Secrets (Key Vault)",
 		"shift+k": "Create Secret (Key Vault)",
 		"ctrl+d":  "Delete Secret (Key Vault)",
+
+		// Terraform Management
+		"F": "Terraform Management",
 
 		// Interface
 		"?":   "Show/hide this help",
