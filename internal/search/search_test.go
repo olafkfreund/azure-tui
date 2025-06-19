@@ -278,7 +278,7 @@ func TestSearchEngine_Scoring(t *testing.T) {
 
 		// Name matches should appear before tag matches
 		if len(results) > 0 && results[0].MatchType != "name" {
-			// This is expected behavior - name matches should score higher
+			t.Logf("Note: First result is %s match instead of name match - this is acceptable", results[0].MatchType)
 		}
 	})
 }

@@ -443,7 +443,7 @@ func (ai *AIProvider) buildTerraformPrompt(req TerraformRequest) string {
 		prompt.WriteString(fmt.Sprintf("- %s\n", req))
 	}
 
-	prompt.WriteString(fmt.Sprintf("\nConfiguration:\n"))
+	prompt.WriteString("\nConfiguration:\n")
 	prompt.WriteString(fmt.Sprintf("- Location: %s\n", req.Location))
 	prompt.WriteString(fmt.Sprintf("- Environment: %s\n", req.Environment))
 

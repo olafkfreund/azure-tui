@@ -879,10 +879,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case resourcesInGroupMsg:
 		// Update resources for specific group
-		for i, resource := range m.allResources {
-			if resource.ResourceGroup == msg.groupName {
+		for i := len(m.allResources) - 1; i >= 0; i-- {
+			if m.allResources[i].ResourceGroup == msg.groupName {
 				m.allResources = append(m.allResources[:i], m.allResources[i+1:]...)
-				i--
 			}
 		}
 		m.allResources = append(m.allResources, msg.resources...)

@@ -239,11 +239,11 @@ func (tm *TerraformManager) Plan() (*PlanOutput, error) {
 			parts := strings.Fields(line)
 			for i, part := range parts {
 				if part == "add," && i > 0 {
-					fmt.Sscanf(parts[i-1], "%d", &planOutput.Add)
+					_, _ = fmt.Sscanf(parts[i-1], "%d", &planOutput.Add)
 				} else if part == "change," && i > 0 {
-					fmt.Sscanf(parts[i-1], "%d", &planOutput.Change)
+					_, _ = fmt.Sscanf(parts[i-1], "%d", &planOutput.Change)
 				} else if part == "destroy." && i > 0 {
-					fmt.Sscanf(parts[i-1], "%d", &planOutput.Destroy)
+					_, _ = fmt.Sscanf(parts[i-1], "%d", &planOutput.Destroy)
 				}
 			}
 		}
