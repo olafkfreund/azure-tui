@@ -19,6 +19,7 @@ import (
 	"github.com/olafkfreund/azure-tui/internal/azure/resourcedetails"
 	"github.com/olafkfreund/azure-tui/internal/azure/storage"
 	"github.com/olafkfreund/azure-tui/internal/openai"
+	"github.com/olafkfreund/azure-tui/internal/search"
 	"github.com/olafkfreund/azure-tui/internal/tui"
 )
 
@@ -195,6 +196,265 @@ type model struct {
 
 	// Navigation stack for back navigation
 	navigationStack []string
+
+	// Search functionality
+	searchEngine      *search.SearchEngine
+	searchMode        bool
+	searchQuery       string
+	searchResults     []search.SearchResult
+	searchResultIndex int
+	searchSuggestions []string
+	showSearchResults bool
+	searchHistory     []string
+	filteredResources []AzureResource
+}
+
+// Helper functions for search functionality
+
+// convertAzureResourceToSearchResource converts AzureResource to search.Resource
+func convertAzureResourceToSearchResource(azResource AzureResource) search.Resource {
+	return search.Resource{
+		ID:            azResource.ID,
+		Name:          azResource.Name,
+		Type:          azResource.Type,
+		Location:      azResource.Location,
+		ResourceGroup: azResource.ResourceGroup,
+		Status:        azResource.Status,
+		Tags:          azResource.Tags,
+		Properties:    azResource.Properties,
+	}
+}
+
+// updateSearchEngine updates the search engine with current resources
+func (m *model) updateSearchEngine() {
+	searchResources := make([]search.Resource, len(m.allResources))
+	for i, azResource := range m.allResources {
+		searchResources[i] = convertAzureResourceToSearchResource(azResource)
+	}
+	m.searchEngine.SetResources(searchResources)
+}
+
+// performSearch executes a search and updates results
+func (m *model) performSearch() {
+	if m.searchQuery == "" {
+		m.searchResults = []search.SearchResult{}
+		m.filteredResources = m.allResources
+		m.showSearchResults = false
+		return
+	}
+
+	results, err := m.searchEngine.Search(m.searchQuery)
+	if err != nil {
+		m.searchResults = []search.SearchResult{}
+		m.filteredResources = []AzureResource{}
+		return
+	}
+
+	m.searchResults = results
+	m.searchResultIndex = 0
+
+	// Create filtered resources list from search results
+	resourceMap := make(map[string]AzureResource)
+	for _, resource := range m.allResources {
+		resourceMap[resource.ID] = resource
+	}
+
+	m.filteredResources = []AzureResource{}
+	seenIDs := make(map[string]bool)
+	for _, result := range results {
+		if !seenIDs[result.ResourceID] {
+			if resource, exists := resourceMap[result.ResourceID]; exists {
+				m.filteredResources = append(m.filteredResources, resource)
+				seenIDs[result.ResourceID] = true
+			}
+		}
+	}
+
+	m.showSearchResults = len(results) > 0
+}
+
+// addToSearchHistory adds a query to search history
+func (m *model) addToSearchHistory(query string) {
+	if query == "" {
+		return
+	}
+
+	// Remove duplicates
+	for i, h := range m.searchHistory {
+		if h == query {
+			m.searchHistory = append(m.searchHistory[:i], m.searchHistory[i+1:]...)
+			break
+		}
+	}
+
+	// Add to front
+	m.searchHistory = append([]string{query}, m.searchHistory...)
+
+	// Limit history size
+	if len(m.searchHistory) > 20 {
+		m.searchHistory = m.searchHistory[:20]
+	}
+}
+
+// navigateSearchResults moves to next/previous search result
+func (m *model) navigateSearchResults(direction int) {
+	if len(m.searchResults) == 0 {
+		return
+	}
+
+	m.searchResultIndex += direction
+	if m.searchResultIndex < 0 {
+		m.searchResultIndex = len(m.searchResults) - 1
+	} else if m.searchResultIndex >= len(m.searchResults) {
+		m.searchResultIndex = 0
+	}
+
+	// Auto-select the resource in tree view
+	if m.searchResultIndex < len(m.searchResults) {
+		result := m.searchResults[m.searchResultIndex]
+		for _, resource := range m.allResources {
+			if resource.ID == result.ResourceID {
+				// Set the selected resource and load details
+				m.selectedResource = &resource
+				break
+			}
+		}
+	}
+}
+
+// enterSearchMode activates search mode
+func (m *model) enterSearchMode() {
+	m.searchMode = true
+	m.searchQuery = ""
+	m.searchResults = []search.SearchResult{}
+	m.searchResultIndex = 0
+	m.showSearchResults = false
+}
+
+// exitSearchMode deactivates search mode and resets filters
+func (m *model) exitSearchMode() {
+	m.searchMode = false
+	m.searchQuery = ""
+	m.searchResults = []search.SearchResult{}
+	m.searchResultIndex = 0
+	m.showSearchResults = false
+	m.filteredResources = m.allResources
+}
+
+// updateSearchSuggestions updates search suggestions based on current query
+func (m *model) updateSearchSuggestions() {
+	if len(m.searchQuery) >= 2 {
+		m.searchSuggestions = m.searchEngine.GetSuggestions(m.searchQuery)
+	} else {
+		m.searchSuggestions = []string{}
+	}
+}
+
+// renderSearchInput renders the search input bar
+func (m *model) renderSearchInput(width int) string {
+	if !m.searchMode {
+		return ""
+	}
+
+	searchStyle := lipgloss.NewStyle().
+		Foreground(fgLight).
+		Background(bgMedium).
+		Padding(0, 1).
+		Width(width)
+
+	prompt := "🔍 Search: "
+	cursor := ""
+	if len(m.searchQuery) == 0 {
+		cursor = "█"
+	}
+
+	content := prompt + m.searchQuery + cursor
+
+	// Show suggestions if available
+	if len(m.searchSuggestions) > 0 {
+		content += "\n" + lipgloss.NewStyle().Faint(true).Render("Suggestions: "+strings.Join(m.searchSuggestions[:min(3, len(m.searchSuggestions))], ", "))
+	}
+
+	// Show search results count
+	if m.showSearchResults {
+		resultCount := fmt.Sprintf(" (%d results)", len(m.searchResults))
+		if len(m.searchResults) > 0 {
+			resultCount += fmt.Sprintf(" [%d/%d]", m.searchResultIndex+1, len(m.searchResults))
+		}
+		content += lipgloss.NewStyle().Foreground(colorAqua).Render(resultCount)
+	}
+
+	return searchStyle.Render(content)
+}
+
+// renderSearchResults renders the search results view
+func (m *model) renderSearchResults(width, height int) string {
+	if !m.showSearchResults || len(m.searchResults) == 0 {
+		return ""
+	}
+
+	var content strings.Builder
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(colorBlue)
+	content.WriteString(headerStyle.Render(fmt.Sprintf("🔍 Search Results (%d found)", len(m.searchResults))))
+	content.WriteString("\n\n")
+
+	// Group results by resource for better display
+	resourceResults := make(map[string][]search.SearchResult)
+	for _, result := range m.searchResults {
+		resourceResults[result.ResourceID] = append(resourceResults[result.ResourceID], result)
+	}
+
+	maxResults := min(height-5, len(resourceResults))
+	resultCount := 0
+
+	for resourceID, results := range resourceResults {
+		if resultCount >= maxResults {
+			break
+		}
+
+		// Find the resource for display
+		var resource AzureResource
+		for _, r := range m.allResources {
+			if r.ID == resourceID {
+				resource = r
+				break
+			}
+		}
+
+		// Highlight current selection
+		isSelected := resultCount == m.searchResultIndex
+		nameStyle := lipgloss.NewStyle().Foreground(colorGreen)
+		if isSelected {
+			nameStyle = nameStyle.Background(bgLight).Bold(true)
+		}
+
+		content.WriteString(nameStyle.Render(fmt.Sprintf("📦 %s", resource.Name)))
+		content.WriteString(fmt.Sprintf(" (%s)\n", lipgloss.NewStyle().Foreground(colorGray).Render(resource.Type)))
+
+		// Show match details
+		for _, result := range results {
+			matchStyle := lipgloss.NewStyle().Foreground(colorYellow).Faint(true)
+			content.WriteString(fmt.Sprintf("   %s: %s\n", matchStyle.Render(result.MatchType), result.MatchValue))
+		}
+
+		content.WriteString("\n")
+		resultCount++
+	}
+
+	if len(resourceResults) > maxResults {
+		moreStyle := lipgloss.NewStyle().Faint(true).Foreground(colorGray)
+		content.WriteString(moreStyle.Render(fmt.Sprintf("... and %d more results", len(resourceResults)-maxResults)))
+	}
+
+	return content.String()
+}
+
+// min returns the minimum of two integers
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 func fetchSubscriptions() ([]Subscription, error) {
@@ -944,6 +1204,16 @@ func initModel() model {
 		expandedProperties:     make(map[string]bool),
 		showHelpPopup:          false,
 		navigationStack:        []string{}, // Initialize navigation stack
+		// Initialize search functionality
+		searchEngine:      search.NewSearchEngine(),
+		searchMode:        false,
+		searchQuery:       "",
+		searchResults:     []search.SearchResult{},
+		searchResultIndex: 0,
+		searchSuggestions: []string{},
+		showSearchResults: false,
+		searchHistory:     []string{},
+		filteredResources: []AzureResource{},
 	}
 }
 
@@ -986,6 +1256,8 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 		m.allResources = append(m.allResources, msg.resources...)
+		// Update search engine with new resources
+		m.updateSearchEngine()
 
 	case resourceDetailsLoadedMsg:
 		m.selectedResource = &msg.resource
@@ -1126,6 +1398,58 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.loadingState = "error"
 
 	case tea.KeyMsg:
+		// Handle search mode input first
+		if m.searchMode {
+			switch msg.String() {
+			case "escape":
+				m.exitSearchMode()
+			case "enter":
+				// Execute search and add to history
+				if m.searchQuery != "" {
+					m.addToSearchHistory(m.searchQuery)
+					m.performSearch()
+				}
+			case "backspace":
+				// Remove last character from search query
+				if len(m.searchQuery) > 0 {
+					m.searchQuery = m.searchQuery[:len(m.searchQuery)-1]
+					m.performSearch()
+					m.updateSearchSuggestions()
+				}
+			case "tab":
+				// Accept first suggestion if available
+				if len(m.searchSuggestions) > 0 {
+					m.searchQuery = m.searchSuggestions[0]
+					m.performSearch()
+				}
+			case "down", "ctrl+j":
+				// Navigate to next search result
+				if m.showSearchResults {
+					m.navigateSearchResults(1)
+					if m.selectedResource != nil {
+						return m, loadResourceDetailsCmd(*m.selectedResource)
+					}
+				}
+			case "up", "ctrl+k":
+				// Navigate to previous search result
+				if m.showSearchResults {
+					m.navigateSearchResults(-1)
+					if m.selectedResource != nil {
+						return m, loadResourceDetailsCmd(*m.selectedResource)
+					}
+				}
+			default:
+				// Add character to search query
+				if len(msg.String()) == 1 && msg.String() >= " " && msg.String() <= "~" {
+					m.searchQuery += msg.String()
+					m.performSearch()
+					m.updateSearchSuggestions()
+				}
+			}
+			return m, nil
+		}
+
+		// Regular key handling when not in search mode
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
@@ -1248,6 +1572,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					key := "agentPoolProfiles"
 					m.expandedProperties[key] = !m.expandedProperties[key]
 				}
+			}
+		case "/":
+			// Enter search mode
+			if !m.searchMode {
+				m.enterSearchMode()
 			}
 		case "s":
 			if m.selectedResource != nil && !m.actionInProgress {
@@ -1485,8 +1814,10 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Toggle help popup
 			m.showHelpPopup = !m.showHelpPopup
 		case "escape":
-			// Close help popup if open, otherwise navigate back
-			if m.showHelpPopup {
+			// Handle escape key for search mode, help popup, or navigation
+			if m.searchMode {
+				m.exitSearchMode()
+			} else if m.showHelpPopup {
 				m.showHelpPopup = false
 			} else {
 				// Try to go back to previous view
@@ -1556,6 +1887,19 @@ func (m model) View() string {
 			m.statusBar.AddSegment(fmt.Sprintf("Esc:Back(%d)", len(m.navigationStack)), colorAqua, bgMedium)
 		}
 
+		// Add search indicators
+		if m.searchMode {
+			m.statusBar.AddSegment("🔍 Search Mode", colorYellow, bgMedium)
+			if m.showSearchResults {
+				m.statusBar.AddSegment(fmt.Sprintf("%d Results", len(m.searchResults)), colorGreen, bgMedium)
+				if len(m.searchResults) > 0 {
+					m.statusBar.AddSegment(fmt.Sprintf("Result %d/%d", m.searchResultIndex+1, len(m.searchResults)), colorPurple, bgMedium)
+				}
+			}
+		} else {
+			m.statusBar.AddSegment("/:Search", colorGray, bgLight)
+		}
+
 		// Add contextual shortcuts
 		m.statusBar.AddSegment(m.getContextualShortcuts(), colorGray, bgLight)
 	}
@@ -1599,7 +1943,13 @@ func (m model) View() string {
 	leftPanel := leftPanelStyle.Render(treeContent)
 
 	// Details panel with scrolling support and STRICT width constraints
-	rightContentRaw := m.renderResourcePanel(rightWidth-4, m.height-2)
+	rightContentRaw := ""
+	if m.searchMode && m.showSearchResults {
+		// Show search results in right panel when in search mode
+		rightContentRaw = m.renderSearchResults(rightWidth-4, m.height-2)
+	} else {
+		rightContentRaw = m.renderResourcePanel(rightWidth-4, m.height-2)
+	}
 
 	// Ensure content is properly wrapped to prevent layout breaking
 	rightContentWrapped := ensureContentWidth(rightContentRaw, rightWidth-8)
@@ -1630,8 +1980,21 @@ func (m model) View() string {
 		statusBarContent = m.statusBar.RenderStatusBar()
 	}
 
+	// Add search input bar if in search mode
+	searchInput := ""
+	if m.searchMode {
+		searchInput = m.renderSearchInput(m.width)
+	}
+
 	mainContent := lipgloss.JoinHorizontal(lipgloss.Top, leftPanel, rightPanel)
-	fullView := lipgloss.JoinVertical(lipgloss.Left, statusBarContent, mainContent)
+
+	// Combine status bar, search input, and main content
+	var fullView string
+	if searchInput != "" {
+		fullView = lipgloss.JoinVertical(lipgloss.Left, statusBarContent, searchInput, mainContent)
+	} else {
+		fullView = lipgloss.JoinVertical(lipgloss.Left, statusBarContent, mainContent)
+	}
 
 	// Render help popup if active
 	if m.showHelpPopup {
@@ -1649,6 +2012,15 @@ func (m model) View() string {
 		helpContent.WriteString("Tab        Switch between panels\n")
 		helpContent.WriteString("e          Expand/collapse complex properties\n")
 		helpContent.WriteString("Ctrl+j/k   Scroll up/down in current panel\n\n")
+
+		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorYellow).Render("🔍 Search:"))
+		helpContent.WriteString("\n")
+		helpContent.WriteString("/          Enter search mode\n")
+		helpContent.WriteString("Enter      Execute search / Accept suggestion\n")
+		helpContent.WriteString("Tab        Accept first suggestion\n")
+		helpContent.WriteString("↑/↓        Navigate search results\n")
+		helpContent.WriteString("Escape     Exit search mode\n")
+		helpContent.WriteString("Advanced:  type:vm location:eastus tag:env=prod\n\n")
 
 		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorAqua).Render("⚡ Resource Actions:"))
 		helpContent.WriteString("\n")
@@ -2556,6 +2928,11 @@ func createShortcutsMap() map[string]string {
 		"Enter":   "Open resource in details panel",
 		"Tab":     "Switch between panels",
 		"e":       "Expand/collapse complex properties",
+
+		// Search
+		"/":      "Enter search mode",
+		"Escape": "Exit search mode",
+		"↑/↓":    "Navigate search results (in search mode)",
 
 		// Resource Actions
 		"s": "Start resource (VMs, Containers)",
