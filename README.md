@@ -236,6 +236,33 @@ go build -o aztui-dev ./cmd
 
 ---
 
+### Windows Build Instructions
+To build a Windows executable (`.exe`) from Linux, use Go's cross-compilation:
+
+```bash
+GOOS=windows GOARCH=amd64 go build -o aztui.exe ./cmd
+```
+
+This will create a `aztui.exe` file that you can run on Windows. You can transfer this file to a Windows machine and double-click to run, or execute from the command prompt:
+
+```cmd
+aztui.exe
+```
+
+- All features work the same as on Linux/NixOS.
+- For demo mode on Windows, use:
+
+```cmd
+set DEMO_MODE=true
+aztui.exe
+```
+
+#### NixOS and Linux
+- For NixOS, use the provided `flake.nix` for reproducible builds (see [README-flake.md](./README-flake.md)).
+- For Linux, use the standard Go build instructions above.
+
+---
+
 ## 📄 License
 
 This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

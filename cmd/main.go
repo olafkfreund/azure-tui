@@ -334,7 +334,7 @@ func loadResourceDetailsCmd(resource AzureResource) tea.Cmd {
 func loadAIDescriptionCmd(ai *openai.AIProvider, resource AzureResource, details *resourcedetails.ResourceDetails) tea.Cmd {
 	return func() tea.Msg {
 		if ai == nil {
-			return aiDescriptionLoadedMsg{description: ""}
+			return aiDescriptionLoadedMsg{description: "AI provider not configured. Set GITHUB_TOKEN or OPENAI_API_KEY environment variable."}
 		}
 
 		detailsStr := fmt.Sprintf("Resource: %s\nType: %s\nLocation: %s\nStatus: %s",
@@ -346,7 +346,28 @@ func loadAIDescriptionCmd(ai *openai.AIProvider, resource AzureResource, details
 
 		description, err := ai.DescribeResource(resource.Type, resource.Name, detailsStr)
 		if err != nil {
-			return aiDescriptionLoadedMsg{description: "AI analysis unavailable"}
+			errorMsg := err.Error()
+			// Check for common API errors and provide helpful messages
+			if strings.Contains(errorMsg, "insufficient_quota") {
+				if ai.ProviderType == "github_copilot" {
+					return aiDescriptionLoadedMsg{description: "❌ GitHub Copilot quota exceeded. Using fallback to OpenAI."}
+				} else {
+					return aiDescriptionLoadedMsg{description: "❌ AI quota exceeded. Please check your billing details or try GitHub Copilot."}
+				}
+			} else if strings.Contains(errorMsg, "invalid_api_key") || strings.Contains(errorMsg, "401") {
+				return aiDescriptionLoadedMsg{description: "❌ Invalid API key. Please check your GITHUB_TOKEN or OPENAI_API_KEY environment variable."}
+			} else if strings.Contains(errorMsg, "rate_limit") {
+				return aiDescriptionLoadedMsg{description: "❌ AI rate limit exceeded. Please try again in a moment."}
+			} else if strings.Contains(errorMsg, "403") || strings.Contains(errorMsg, "forbidden") {
+				if ai.ProviderType == "github_copilot" {
+					return aiDescriptionLoadedMsg{description: "❌ GitHub Copilot access forbidden. Check your subscription or use OPENAI_API_KEY instead."}
+				} else {
+					return aiDescriptionLoadedMsg{description: "❌ API access forbidden. Please check your credentials."}
+				}
+			} else {
+				providerInfo := fmt.Sprintf(" (Provider: %s)", ai.ProviderType)
+				return aiDescriptionLoadedMsg{description: fmt.Sprintf("❌ AI analysis failed: %v%s", err, providerInfo)}
+			}
 		}
 
 		return aiDescriptionLoadedMsg{description: description}
@@ -904,11 +925,8 @@ func (m model) getContextualShortcuts() string {
 }
 
 func initModel() model {
-	// Initialize AI provider if API key is available
-	var ai *openai.AIProvider
-	if apiKey := os.Getenv("OPENAI_API_KEY"); apiKey != "" {
-		ai = openai.NewAIProvider(apiKey)
-	}
+	// Initialize AI provider with auto-detection (GitHub Copilot or OpenAI)
+	ai := openai.NewAIProviderAuto()
 
 	return model{
 		treeView:               tui.NewTreeView(),
@@ -972,12 +990,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case resourceDetailsLoadedMsg:
 		m.selectedResource = &msg.resource
 		m.resourceDetails = msg.details
-		// Load AI description after resource details are loaded
-		if m.aiProvider != nil {
+		// Only automatically load AI description if auto-analysis is enabled and provider is available
+		autoAI := os.Getenv("AZURE_TUI_AUTO_AI") != "false" // Default to true unless explicitly disabled
+		if m.aiProvider != nil && autoAI {
+			m.actionInProgress = true
 			return m, loadAIDescriptionCmd(m.aiProvider, msg.resource, msg.details)
 		}
 
 	case aiDescriptionLoadedMsg:
+		m.actionInProgress = false
 		m.aiDescription = msg.description
 
 	case resourceActionMsg:
@@ -1360,7 +1381,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, execIntoContainerCmd(m.selectedResource.Name, m.selectedResource.ResourceGroup, "", "/bin/bash")
 			}
 		case "a":
-			// Attach to container (only for container instances)
+			// AI Analysis for selected resource (general case)
+			if m.selectedResource != nil && !m.actionInProgress && m.aiProvider != nil {
+				m.actionInProgress = true
+				return m, loadAIDescriptionCmd(m.aiProvider, *m.selectedResource, m.resourceDetails)
+			}
+			// Attach to container (only for container instances) - fallback if no AI provider
 			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.ContainerInstance/containerGroups" {
 				m.actionInProgress = true
 				return m, attachToContainerCmd(m.selectedResource.Name, m.selectedResource.ResourceGroup, "")

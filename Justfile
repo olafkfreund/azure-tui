@@ -27,3 +27,7 @@ clean:
 # Lint (requires golangci-lint installed)
 lint:
 	golangci-lint run ./...
+
+# Build a Windows .exe binary (cross-compile)
+build-windows:
+	GOOS=windows GOARCH=amd64 go build -o azure-tui.exe ./cmd/main.go

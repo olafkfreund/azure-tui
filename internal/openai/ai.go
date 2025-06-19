@@ -2,22 +2,167 @@ package openai
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
+	"time"
 
 	openai "github.com/sashabaranov/go-openai"
 )
 
+// GitHubCopilotConfig represents the structure of the GitHub Copilot config file
+type GitHubCopilotConfig struct {
+	Apps map[string]struct {
+		OAuthToken string `json:"oauth_token"`
+	} `json:"apps"`
+}
+
+// getGitHubCopilotToken attempts to read the OAuth token from GitHub Copilot config
+func getGitHubCopilotToken() string {
+	// Check environment variable first
+	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
+		return token
+	}
+
+	// Try to read from GitHub Copilot config file
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	configPath := filepath.Join(homeDir, ".config", "github-copilot", "apps.json")
+
+	// Check if config file exists
+	if _, err := os.Stat(configPath); os.IsNotExist(err) {
+		return ""
+	}
+
+	// Read and parse config file
+	data, err := ioutil.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+
+	var config GitHubCopilotConfig
+	if err := json.Unmarshal(data, &config); err != nil {
+		return ""
+	}
+
+	// Extract token from any app entry (usually there's only one)
+	for _, app := range config.Apps {
+		if app.OAuthToken != "" {
+			return app.OAuthToken
+		}
+	}
+
+	return ""
+}
+
 type AIProvider struct {
-	Client *openai.Client
+	Client       *openai.Client
+	ProviderType string // "openai" or "github_copilot"
 }
 
 func NewAIProvider(apiKey string) *AIProvider {
 	config := openai.DefaultConfig(apiKey)
 	config.HTTPClient = &http.Client{}
-	return &AIProvider{Client: openai.NewClientWithConfig(config)}
+	return &AIProvider{
+		Client:       openai.NewClientWithConfig(config),
+		ProviderType: "openai",
+	}
+}
+
+// GitHubCopilotTransport adds required headers for GitHub Copilot API
+type GitHubCopilotTransport struct {
+	Transport http.RoundTripper
+}
+
+func (t *GitHubCopilotTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Add required headers for GitHub Copilot
+	req.Header.Set("Copilot-Integration-Id", "vscode-chat")
+	req.Header.Set("Editor-Version", "vscode/1.85.0")
+	req.Header.Set("Editor-Plugin-Version", "copilot-chat/0.11.1")
+	req.Header.Set("User-Agent", "GitHubCopilotChat/0.11.1")
+
+	// Use default transport if none specified
+	transport := t.Transport
+	if transport == nil {
+		transport = http.DefaultTransport
+	}
+
+	return transport.RoundTrip(req)
+}
+
+// NewGitHubCopilotProvider creates an AI provider using GitHub Copilot API
+func NewGitHubCopilotProvider(githubToken string) *AIProvider {
+	// GitHub Copilot uses OpenAI-compatible chat completions API
+	config := openai.DefaultConfig(githubToken)
+	config.BaseURL = "https://api.githubcopilot.com"
+
+	// Create custom HTTP client with required headers for GitHub Copilot
+	client := &http.Client{
+		Transport: &GitHubCopilotTransport{},
+	}
+	config.HTTPClient = client
+
+	return &AIProvider{
+		Client:       openai.NewClientWithConfig(config),
+		ProviderType: "github_copilot",
+	}
+}
+
+// testGitHubCopilotAccess tests if the GitHub Copilot API is accessible
+func testGitHubCopilotAccess(token string) bool {
+	client := &http.Client{
+		Transport: &GitHubCopilotTransport{},
+		Timeout:   5 * time.Second,
+	}
+
+	req, err := http.NewRequest("GET", "https://api.githubcopilot.com/models", nil)
+	if err != nil {
+		return false
+	}
+
+	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+
+	return resp.StatusCode == 200
+}
+
+// NewAIProviderAuto automatically detects and creates the appropriate AI provider
+func NewAIProviderAuto() *AIProvider {
+	// Check for GitHub Copilot first (recommended)
+	if githubToken := getGitHubCopilotToken(); githubToken != "" {
+		// Use GitHub Copilot by default when token is available
+		// Set USE_GITHUB_COPILOT=false to disable explicitly
+		if useGitHubCopilot := os.Getenv("USE_GITHUB_COPILOT"); useGitHubCopilot != "false" {
+			provider := NewGitHubCopilotProvider(githubToken)
+
+			// Test if GitHub Copilot access works by trying a simple API call
+			if testGitHubCopilotAccess(githubToken) {
+				return provider
+			}
+			// If GitHub Copilot test fails, fall back to OpenAI
+		}
+	}
+
+	// Fall back to OpenAI
+	if openaiKey := os.Getenv("OPENAI_API_KEY"); openaiKey != "" {
+		return NewAIProvider(openaiKey)
+	}
+
+	// No AI provider available
+	return nil
 }
 
 func (ai *AIProvider) Ask(question string, contextStr string) (string, error) {
@@ -43,8 +188,14 @@ func (ai *AIProvider) DescribeResource(resourceType, resourceName, resourceDetai
 	return ai.Ask(prompt, "Azure Resource Analysis")
 }
 
-// getModel returns the OpenAI model to use for completions
+// getModel returns the appropriate model for the AI provider
 func (ai *AIProvider) getModel() string {
+	if ai.ProviderType == "github_copilot" {
+		// GitHub Copilot: use gpt-4o-mini as it's available and efficient
+		return "gpt-4o-mini"
+	}
+
+	// For OpenAI, check environment variable or use default
 	model := os.Getenv("OPENAI_MODEL")
 	if model == "" {
 		model = "gpt-4" // Default to GPT-4
