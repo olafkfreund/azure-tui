@@ -1,153 +1,100 @@
-# Resource Group
 variable "resource_group_name" {
   description = "Name of the resource group"
   type        = string
-  default     = "rg-aci-multi-container"
+  default     = "rg-linux-vm"
 }
 
 variable "location" {
   description = "Azure region for resources"
   type        = string
   default     = "East US"
-}
-
-# Container Group
-variable "container_group_name" {
-  description = "Name of the container group"
-  type        = string
-  default     = "aci-multi-container"
-}
-
-variable "ip_address_type" {
-  description = "IP address type for the container group"
-  type        = string
-  default     = "Public"
+  
   validation {
-    condition     = contains(["Public", "Private"], var.ip_address_type)
-    error_message = "IP address type must be either 'Public' or 'Private'."
+    condition = contains([
+      "East US", "East US 2", "West US", "West US 2", "West US 3",
+      "Central US", "North Central US", "South Central US", "West Central US",
+      "Canada Central", "Canada East", "Brazil South", "UK South", "UK West",
+      "North Europe", "West Europe", "France Central", "Germany West Central",
+      "Norway East", "Switzerland North", "UAE North", "South Africa North",
+      "Australia East", "Australia Southeast", "Central India", "South India",
+      "Japan East", "Japan West", "Korea Central", "Southeast Asia", "East Asia"
+    ], var.location)
+    error_message = "The location must be a valid Azure region."
   }
 }
 
-variable "dns_name_label" {
-  description = "DNS name label for the container group"
+variable "vm_name" {
+  description = "Name of the virtual machine"
   type        = string
-  default     = "aci-multi-app"
+  default     = "vm-linux-01"
+  
+  validation {
+    condition     = can(regex("^[a-zA-Z0-9-]{1,64}$", var.vm_name))
+    error_message = "VM name must be between 1-64 characters and contain only alphanumeric characters and hyphens."
+  }
 }
 
-variable "os_type" {
-  description = "Operating system type"
+variable "vm_size" {
+  description = "Size of the virtual machine"
   type        = string
-  default     = "Linux"
+  default     = "Standard_B2s"
+  
   validation {
-    condition     = contains(["Linux", "Windows"], var.os_type)
-    error_message = "OS type must be either 'Linux' or 'Windows'."
+    condition = contains([
+      "Standard_B1s", "Standard_B1ms", "Standard_B2s", "Standard_B2ms", "Standard_B4ms",
+      "Standard_D2s_v3", "Standard_D4s_v3", "Standard_D8s_v3", "Standard_D16s_v3",
+      "Standard_E2s_v3", "Standard_E4s_v3", "Standard_E8s_v3", "Standard_E16s_v3"
+    ], var.vm_size)
+    error_message = "VM size must be a valid Azure VM size."
   }
 }
 
-variable "restart_policy" {
-  description = "Restart policy for the container group"
+variable "admin_username" {
+  description = "Admin username for the virtual machine"
   type        = string
-  default     = "Always"
+  default     = "azureuser"
+  
   validation {
-    condition     = contains(["Always", "Never", "OnFailure"], var.restart_policy)
-    error_message = "Restart policy must be one of: 'Always', 'Never', 'OnFailure'."
+    condition     = can(regex("^[a-z_][a-z0-9_-]*[$]?$", var.admin_username)) && length(var.admin_username) >= 1 && length(var.admin_username) <= 32
+    error_message = "Admin username must be between 1-32 characters, start with a letter or underscore, and contain only lowercase letters, numbers, hyphens, and underscores."
   }
 }
 
-# Web Container
-variable "web_image" {
-  description = "Docker image for the web container"
+variable "os_disk_type" {
+  description = "Type of OS disk (Standard_LRS, Premium_LRS, StandardSSD_LRS)"
   type        = string
-  default     = "nginx:alpine"
-}
-
-variable "web_cpu" {
-  description = "CPU allocation for the web container"
-  type        = number
-  default     = 0.5
+  default     = "Standard_LRS"
+  
   validation {
-    condition     = var.web_cpu >= 0.1 && var.web_cpu <= 4.0
-    error_message = "CPU allocation must be between 0.1 and 4.0."
+    condition     = contains(["Standard_LRS", "Premium_LRS", "StandardSSD_LRS", "UltraSSD_LRS"], var.os_disk_type)
+    error_message = "OS disk type must be Standard_LRS, Premium_LRS, StandardSSD_LRS, or UltraSSD_LRS."
   }
 }
 
-variable "web_memory" {
-  description = "Memory allocation for the web container (in GB)"
-  type        = number
-  default     = 1.5
-  validation {
-    condition     = var.web_memory >= 0.1 && var.web_memory <= 8.0
-    error_message = "Memory allocation must be between 0.1 and 8.0 GB."
-  }
-}
-
-variable "web_environment_variables" {
-  description = "Environment variables for the web container"
-  type        = map(string)
-  default     = {
-    NGINX_PORT = "80"
-  }
-}
-
-# API Container
-variable "api_image" {
-  description = "Docker image for the API container"
-  type        = string
-  default     = "httpd:alpine"
-}
-
-variable "api_cpu" {
-  description = "CPU allocation for the API container"
-  type        = number
-  default     = 0.5
-  validation {
-    condition     = var.api_cpu >= 0.1 && var.api_cpu <= 4.0
-    error_message = "CPU allocation must be between 0.1 and 4.0."
-  }
-}
-
-variable "api_memory" {
-  description = "Memory allocation for the API container (in GB)"
-  type        = number
-  default     = 1.5
-  validation {
-    condition     = var.api_memory >= 0.1 && var.api_memory <= 8.0
-    error_message = "Memory allocation must be between 0.1 and 8.0 GB."
-  }
-}
-
-variable "api_environment_variables" {
-  description = "Environment variables for the API container"
-  type        = map(string)
-  default     = {
-    API_PORT = "8080"
-  }
-}
-
-# Diagnostics
-variable "enable_diagnostics" {
-  description = "Enable diagnostic logging"
+variable "install_docker" {
+  description = "Whether to install Docker on the VM"
   type        = bool
   default     = false
 }
 
-variable "log_retention_days" {
-  description = "Log retention period in days"
-  type        = number
-  default     = 30
-  validation {
-    condition     = var.log_retention_days >= 30 && var.log_retention_days <= 730
-    error_message = "Log retention must be between 30 and 730 days."
-  }
-}
-
-# Tags
 variable "tags" {
   description = "Tags to apply to all resources"
   type        = map(string)
   default = {
-    Environment = "dev"
-    Project     = "azure-tui"
-    Component   = "aci-multi-container"
+    Environment = "Development"
+    Project     = "Azure-TUI"
+    ManagedBy   = "Terraform"
+    CreatedBy   = "Azure-TUI"
+  }
+}
+
+variable "ssh_source_addresses" {
+  description = "List of source IP addresses allowed for SSH access"
+  type        = list(string)
+  default     = ["*"]
+  
+  validation {
+    condition     = length(var.ssh_source_addresses) > 0
+    error_message = "At least one source address must be specified for SSH access."
   }
 }

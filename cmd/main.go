@@ -20,6 +20,7 @@ import (
 	"github.com/olafkfreund/azure-tui/internal/azure/resourcedetails"
 	"github.com/olafkfreund/azure-tui/internal/azure/storage"
 	"github.com/olafkfreund/azure-tui/internal/azure/tfbicep"
+	"github.com/olafkfreund/azure-tui/internal/config"
 	"github.com/olafkfreund/azure-tui/internal/openai"
 	"github.com/olafkfreund/azure-tui/internal/search"
 	"github.com/olafkfreund/azure-tui/internal/terraform"
@@ -137,6 +138,19 @@ type terraformOperationMsg struct {
 	success   bool
 }
 
+// Settings message types
+type settingsFoldersLoadedMsg struct {
+	folders []string
+}
+type settingsConfigLoadedMsg struct {
+	config  *config.AppConfig
+	content string
+}
+type settingsConfigSavedMsg struct {
+	success bool
+	message string
+}
+
 // Storage Account message types
 type storageContainersMsg struct {
 	accountName string
@@ -226,14 +240,26 @@ type model struct {
 	filteredResources []AzureResource
 
 	// Terraform integration
-	showTerraformPopup   bool
-	terraformMenuIndex   int
-	terraformMode        string // "menu", "folder-select", "templates", "workspaces", "operations"
-	terraformFolderPath  string
-	terraformMenuOptions []string
-	terraformFolders     []string
-	terraformAnalysis    string
-	terraformMenuAction  string // Track the original menu action for folder selection
+	showTerraformPopup    bool
+	terraformMenuIndex    int
+	terraformMode         string // "menu", "folder-select", "templates", "workspaces", "operations"
+	terraformFolderPath   string
+	terraformMenuOptions  []string
+	terraformFolders      []string
+	terraformAnalysis     string
+	terraformMenuAction   string // Track the original menu action for folder selection
+	terraformScrollOffset int    // For scrolling through long analysis text
+
+	// Settings menu functionality
+	showSettingsPopup     bool
+	settingsMenuIndex     int
+	settingsMode          string // "menu", "config-view", "folder-browser", "edit-setting"
+	settingsCurrentPath   string
+	settingsFolders       []string
+	settingsConfigContent string
+	settingsEditKey       string
+	settingsEditValue     string
+	settingsCurrentConfig *config.AppConfig
 }
 
 // Helper functions for search functionality
@@ -482,34 +508,44 @@ func (m *model) handleTerraformMenuSelection() (tea.Model, tea.Cmd) {
 	case "menu":
 		switch m.terraformMenuIndex {
 		case 0: // Browse Folders
-			if len(m.terraformFolders) > 0 {
-				m.terraformMode = "folder-select"
-				m.terraformMenuIndex = 0
-				m.terraformMenuAction = "browse"
+			m.terraformMode = "folder-select"
+			m.terraformMenuIndex = 0
+			m.terraformMenuAction = "browse"
+			// If folders aren't loaded yet, load them
+			if len(m.terraformFolders) == 0 {
+				return *m, loadTerraformFoldersCmd()
 			}
 		case 1: // Create from Template
-			if len(m.terraformFolders) > 0 {
-				m.terraformMode = "folder-select"
-				m.terraformMenuIndex = 0
-				m.terraformMenuAction = "template"
+			m.terraformMode = "folder-select"
+			m.terraformMenuIndex = 0
+			m.terraformMenuAction = "template"
+			// If folders aren't loaded yet, load them
+			if len(m.terraformFolders) == 0 {
+				return *m, loadTerraformFoldersCmd()
 			}
 		case 2: // Analyze Code
-			if len(m.terraformFolders) > 0 {
-				m.terraformMode = "folder-select"
-				m.terraformMenuIndex = 0
-				m.terraformMenuAction = "analyze"
+			m.terraformMode = "folder-select"
+			m.terraformMenuIndex = 0
+			m.terraformMenuAction = "analyze"
+			// If folders aren't loaded yet, load them
+			if len(m.terraformFolders) == 0 {
+				return *m, loadTerraformFoldersCmd()
 			}
 		case 3: // Terraform Operations
-			if len(m.terraformFolders) > 0 {
-				m.terraformMode = "folder-select"
-				m.terraformMenuIndex = 0
-				m.terraformMenuAction = "operations"
+			m.terraformMode = "folder-select"
+			m.terraformMenuIndex = 0
+			m.terraformMenuAction = "operations"
+			// If folders aren't loaded yet, load them
+			if len(m.terraformFolders) == 0 {
+				return *m, loadTerraformFoldersCmd()
 			}
 		case 4: // Open External Editor
-			if len(m.terraformFolders) > 0 {
-				m.terraformMode = "folder-select"
-				m.terraformMenuIndex = 0
-				m.terraformMenuAction = "editor"
+			m.terraformMode = "folder-select"
+			m.terraformMenuIndex = 0
+			m.terraformMenuAction = "editor"
+			// If folders aren't loaded yet, load them
+			if len(m.terraformFolders) == 0 {
+				return *m, loadTerraformFoldersCmd()
 			}
 		}
 	case "folder-select":
@@ -533,6 +569,81 @@ func (m *model) handleTerraformMenuSelection() (tea.Model, tea.Cmd) {
 			default:
 				return *m, analyzeTerraformCodeCmd(selectedFolder)
 			}
+		}
+	}
+	return *m, nil
+}
+
+// handleTerraformDeploymentSelection handles the selection from the deployment menu
+func (m *model) handleTerraformDeploymentSelection() (tea.Model, tea.Cmd) {
+	switch m.terraformMenuIndex {
+	case 0: // Initialize Terraform (terraform init)
+		m.showTerraformPopup = false
+		return *m, executeTerraformOperationCmd("init", m.terraformFolderPath)
+	case 1: // Plan Deployment (terraform plan)
+		m.showTerraformPopup = false
+		return *m, executeTerraformOperationCmd("plan", m.terraformFolderPath)
+	case 2: // Deploy Infrastructure (terraform apply)
+		m.showTerraformPopup = false
+		return *m, executeTerraformOperationCmd("apply", m.terraformFolderPath)
+	case 3: // Edit Template Files
+		m.showTerraformPopup = false
+		return *m, analyzeTerraformCodeCmd(m.terraformFolderPath)
+	case 4: // Open in External Editor
+		m.showTerraformPopup = false
+		return *m, openTerraformEditorCmd(m.terraformFolderPath)
+	case 5: // Return to Main Menu
+		m.terraformMode = "menu"
+		m.terraformMenuIndex = 0
+		return *m, nil
+	}
+	return *m, nil
+}
+
+// handleSettingsMenuSelection handles the selection from the Settings menu
+func (m *model) handleSettingsMenuSelection() (tea.Model, tea.Cmd) {
+	switch m.settingsMode {
+	case "menu":
+		switch m.settingsMenuIndex {
+		case 0: // View Configuration
+			m.settingsMode = "config-view"
+			return *m, nil
+		case 1: // Edit Terraform Directory
+			m.settingsMode = "folder-browser"
+			m.settingsMenuIndex = 0
+			return *m, loadSettingsFoldersCmd()
+		case 2: // Edit UI Settings
+			if m.settingsCurrentConfig != nil {
+				m.settingsMode = "edit-setting"
+				m.settingsEditKey = "UI Settings"
+				m.settingsEditValue = fmt.Sprintf("PopupWidth: %d, PopupHeight: %d",
+					m.settingsCurrentConfig.UI.PopupWidth,
+					m.settingsCurrentConfig.UI.PopupHeight)
+			}
+			return *m, nil
+		case 3: // Edit Editor Settings
+			if m.settingsCurrentConfig != nil {
+				m.settingsMode = "edit-setting"
+				m.settingsEditKey = "Editor Settings"
+				m.settingsEditValue = m.settingsCurrentConfig.Editor.DefaultEditor
+			}
+			return *m, nil
+		case 4: // Save Configuration
+			if m.settingsCurrentConfig != nil {
+				m.showSettingsPopup = false
+				return *m, saveSettingsConfigCmd(m.settingsCurrentConfig)
+			}
+		}
+	case "folder-browser":
+		if m.settingsMenuIndex < len(m.settingsFolders) {
+			selectedPath := m.settingsFolders[m.settingsMenuIndex]
+			m.settingsCurrentPath = selectedPath
+			if m.settingsCurrentConfig != nil {
+				m.settingsCurrentConfig.Terraform.WorkspacePath = selectedPath
+			}
+			m.settingsMode = "menu"
+			m.settingsMenuIndex = 0
+			return *m, nil
 		}
 	}
 	return *m, nil
@@ -1290,12 +1401,50 @@ func (m model) getTerraformShortcuts() string {
 
 	case "analysis":
 		shortcuts = append(shortcuts, []string{
-			"Enter:Back", "Esc:Close",
+			"↑/↓:Scroll", "Enter:Back", "Esc:Close",
+		}...)
+
+	case "deployment":
+		shortcuts = append(shortcuts, []string{
+			"↑/↓:Navigate", "Enter:Select", "Esc:Back",
 		}...)
 	}
 
 	// Always available shortcuts
 	baseShortcuts := []string{"Ctrl+T:Menu", "?:Help"}
+	shortcuts = append(shortcuts, baseShortcuts...)
+
+	return strings.Join(shortcuts, " ")
+}
+
+// getSettingsShortcuts returns relevant shortcuts based on the current Settings mode
+func (m model) getSettingsShortcuts() string {
+	var shortcuts []string
+
+	switch m.settingsMode {
+	case "menu":
+		shortcuts = append(shortcuts, []string{
+			"↑/↓:Navigate", "Enter:Select", "Esc:Close",
+		}...)
+
+	case "config-view":
+		shortcuts = append(shortcuts, []string{
+			"Enter:Back", "Esc:Close",
+		}...)
+
+	case "folder-browser":
+		shortcuts = append(shortcuts, []string{
+			"↑/↓:Navigate", "Enter:Select", "Esc:Back",
+		}...)
+
+	case "edit-setting":
+		shortcuts = append(shortcuts, []string{
+			"Esc:Back",
+		}...)
+	}
+
+	// Always available shortcuts
+	baseShortcuts := []string{"Ctrl+,:Menu", "?:Help"}
 	shortcuts = append(shortcuts, baseShortcuts...)
 
 	return strings.Join(shortcuts, " ")
@@ -1343,9 +1492,20 @@ func initModel() model {
 			"Terraform Operations",
 			"Open External Editor",
 		},
-		terraformFolders:    []string{},
-		terraformAnalysis:   "",
-		terraformMenuAction: "",
+		terraformFolders:      []string{},
+		terraformAnalysis:     "",
+		terraformMenuAction:   "",
+		terraformScrollOffset: 0,
+		// Initialize Settings functionality
+		showSettingsPopup:     false,
+		settingsMenuIndex:     0,
+		settingsMode:          "menu",
+		settingsCurrentPath:   "",
+		settingsFolders:       []string{},
+		settingsConfigContent: "",
+		settingsEditKey:       "",
+		settingsEditValue:     "",
+		settingsCurrentConfig: nil,
 	}
 }
 
@@ -1535,6 +1695,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.terraformFolderPath = msg.path
 		m.terraformMode = "analysis"
 		m.showTerraformPopup = true
+		m.terraformScrollOffset = 0 // Reset scroll when loading new analysis
 
 	case terraformOperationMsg:
 		m.actionInProgress = false
@@ -1544,11 +1705,130 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.logEntries = append(m.logEntries, fmt.Sprintf("Terraform %s: %s - %s", msg.operation, status, msg.result))
 
+		// Handle template creation success - start deployment workflow
+		if msg.operation == "template" && msg.success {
+			// Switch to deployment mode and show deployment options
+			m.terraformMode = "deployment"
+			m.terraformMenuIndex = 0
+			// Keep the popup open to show deployment options
+		}
+
+	// Settings message handlers
+	case settingsFoldersLoadedMsg:
+		m.settingsFolders = msg.folders
+
+	case settingsConfigLoadedMsg:
+		m.settingsCurrentConfig = msg.config
+		m.settingsConfigContent = msg.content
+		if msg.config != nil {
+			m.settingsMode = "config-view"
+		}
+
+	case settingsConfigSavedMsg:
+		m.actionInProgress = false
+		if msg.success {
+			m.logEntries = append(m.logEntries, "Settings: "+msg.message)
+		} else {
+			m.logEntries = append(m.logEntries, "Settings Error: "+msg.message)
+		}
+
 	case errorMsg:
 		m.loadingState = "error"
 
 	case tea.KeyMsg:
-		// Handle search mode input first
+		// Handle popups first (they should take priority over search mode)
+
+		// Handle Terraform popup navigation
+		if m.showTerraformPopup {
+			switch msg.String() {
+			case "escape":
+				if m.terraformMode == "analysis" || m.terraformMode == "deployment" {
+					// Go back to menu from analysis or deployment
+					m.terraformMode = "menu"
+					m.terraformMenuIndex = 0
+					m.terraformScrollOffset = 0 // Reset scroll when going back to menu
+				} else {
+					m.showTerraformPopup = false
+				}
+			case "enter":
+				if m.terraformMode == "analysis" {
+					// Go back to menu from analysis
+					m.terraformMode = "menu"
+					m.terraformMenuIndex = 0
+					m.terraformScrollOffset = 0 // Reset scroll when going back to menu
+				} else if m.terraformMode == "deployment" {
+					return m.handleTerraformDeploymentSelection()
+				} else {
+					return m.handleTerraformMenuSelection()
+				}
+			case "j", "down":
+				if m.terraformMode == "menu" {
+					m.terraformMenuIndex = (m.terraformMenuIndex + 1) % len(m.terraformMenuOptions)
+				} else if m.terraformMode == "folder-select" {
+					m.terraformMenuIndex = (m.terraformMenuIndex + 1) % len(m.terraformFolders)
+				} else if m.terraformMode == "deployment" {
+					// Navigate deployment options (6 options)
+					m.terraformMenuIndex = (m.terraformMenuIndex + 1) % 6
+				} else if m.terraformMode == "analysis" {
+					// Scroll down in analysis text
+					m.terraformScrollOffset += 1
+				}
+			case "k", "up":
+				if m.terraformMode == "menu" {
+					m.terraformMenuIndex = (m.terraformMenuIndex - 1 + len(m.terraformMenuOptions)) % len(m.terraformMenuOptions)
+				} else if m.terraformMode == "folder-select" {
+					m.terraformMenuIndex = (m.terraformMenuIndex - 1 + len(m.terraformFolders)) % len(m.terraformFolders)
+				} else if m.terraformMode == "deployment" {
+					// Navigate deployment options (6 options)
+					m.terraformMenuIndex = (m.terraformMenuIndex - 1 + 6) % 6
+				} else if m.terraformMode == "analysis" {
+					// Scroll up in analysis text (prevent negative scroll)
+					if m.terraformScrollOffset > 0 {
+						m.terraformScrollOffset -= 1
+					}
+				}
+			}
+			return m, nil
+		}
+
+		// Handle Settings popup navigation
+		if m.showSettingsPopup {
+			switch msg.String() {
+			case "escape":
+				if m.settingsMode == "config-view" || m.settingsMode == "folder-browser" {
+					// Go back to main settings menu
+					m.settingsMode = "menu"
+					m.settingsMenuIndex = 0
+				} else {
+					m.showSettingsPopup = false
+				}
+			case "enter":
+				if m.settingsMode == "config-view" {
+					// Go back to menu from config view
+					m.settingsMode = "menu"
+					m.settingsMenuIndex = 0
+				} else {
+					return m.handleSettingsMenuSelection()
+				}
+			case "j", "down":
+				if m.settingsMode == "menu" {
+					settingsMenuOptions := []string{"View Config", "Edit Config", "Browse Folders", "Reset to Defaults"}
+					m.settingsMenuIndex = (m.settingsMenuIndex + 1) % len(settingsMenuOptions)
+				} else if m.settingsMode == "folder-browser" {
+					m.settingsMenuIndex = (m.settingsMenuIndex + 1) % len(m.settingsFolders)
+				}
+			case "k", "up":
+				if m.settingsMode == "menu" {
+					settingsMenuOptions := []string{"View Config", "Edit Config", "Browse Folders", "Reset to Defaults"}
+					m.settingsMenuIndex = (m.settingsMenuIndex - 1 + len(settingsMenuOptions)) % len(settingsMenuOptions)
+				} else if m.settingsMode == "folder-browser" {
+					m.settingsMenuIndex = (m.settingsMenuIndex - 1 + len(m.settingsFolders)) % len(m.settingsFolders)
+				}
+			}
+			return m, nil
+		}
+
+		// Handle search mode input after popups
 		if m.searchMode {
 			switch msg.String() {
 			case "escape":
@@ -1599,41 +1879,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
-		// Handle Terraform popup navigation
-		if m.showTerraformPopup {
-			switch msg.String() {
-			case "escape":
-				if m.terraformMode == "analysis" {
-					// Go back to menu from analysis
-					m.terraformMode = "menu"
-					m.terraformMenuIndex = 0
-				} else {
-					m.showTerraformPopup = false
-				}
-			case "enter":
-				if m.terraformMode == "analysis" {
-					// Go back to menu from analysis
-					m.terraformMode = "menu"
-					m.terraformMenuIndex = 0
-				} else {
-					return m.handleTerraformMenuSelection()
-				}
-			case "j", "down":
-				if m.terraformMode == "menu" {
-					m.terraformMenuIndex = (m.terraformMenuIndex + 1) % len(m.terraformMenuOptions)
-				} else if m.terraformMode == "folder-select" {
-					m.terraformMenuIndex = (m.terraformMenuIndex + 1) % len(m.terraformFolders)
-				}
-			case "k", "up":
-				if m.terraformMode == "menu" {
-					m.terraformMenuIndex = (m.terraformMenuIndex - 1 + len(m.terraformMenuOptions)) % len(m.terraformMenuOptions)
-				} else if m.terraformMode == "folder-select" {
-					m.terraformMenuIndex = (m.terraformMenuIndex - 1 + len(m.terraformFolders)) % len(m.terraformFolders)
-				}
-			}
-			return m, nil
-		}
-
 		// Regular key handling when not in search mode
 		switch msg.String() {
 		case "q", "ctrl+c":
@@ -1649,6 +1894,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, loadTerraformFoldersCmd()
 			} else {
 				m.showTerraformPopup = false
+			}
+
+		// Settings Menu - Primary Access Key
+		case "ctrl+,":
+			if !m.showSettingsPopup {
+				m.showSettingsPopup = true
+				m.settingsMode = "menu"
+				m.settingsMenuIndex = 0
+				return m, loadSettingsConfigCmd()
+			} else {
+				m.showSettingsPopup = false
 			}
 
 		case "left", "h":
@@ -2271,6 +2527,7 @@ func (m model) View() string {
 		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGray).Render("🎮 Interface:"))
 		helpContent.WriteString("\n")
 		helpContent.WriteString("?          Show/hide this help\n")
+		helpContent.WriteString("Ctrl+,     Open Settings Manager\n")
 		helpContent.WriteString("Esc        Navigate back / Close dialogs\n")
 		helpContent.WriteString("q          Quit application\n\n")
 
@@ -2295,6 +2552,11 @@ func (m model) View() string {
 	// Render Terraform popup if active
 	if m.showTerraformPopup {
 		return m.renderTerraformPopup(fullView)
+	}
+
+	// Render Settings popup if active
+	if m.showSettingsPopup {
+		return m.renderSettingsPopup(fullView)
 	}
 
 	return lipgloss.NewStyle().Background(bgDark).Render(fullView)
@@ -2359,7 +2621,71 @@ func (m model) renderTerraformPopup(background string) string {
 	case "analysis":
 		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render(fmt.Sprintf("Code Analysis: %s", m.terraformFolderPath)))
 		content.WriteString("\n\n")
-		content.WriteString(m.terraformAnalysis)
+
+		// Apply scrolling to the analysis text
+		analysisLines := strings.Split(m.terraformAnalysis, "\n")
+
+		// Calculate visible lines (popup height - header - footer - status bar)
+		visibleLines := 15 // Reasonable default for popup content
+
+		// Apply scroll offset
+		startLine := m.terraformScrollOffset
+		endLine := min(startLine+visibleLines, len(analysisLines))
+
+		// Ensure we don't scroll past the beginning
+		if startLine >= len(analysisLines) {
+			startLine = max(0, len(analysisLines)-visibleLines)
+			m.terraformScrollOffset = startLine
+		}
+
+		// Add scroll indicators
+		if startLine > 0 {
+			content.WriteString(lipgloss.NewStyle().Foreground(colorGray).Render("↑ (more content above - use k/↑ to scroll up)\n"))
+		}
+
+		// Render visible lines
+		for i := startLine; i < endLine; i++ {
+			if i < len(analysisLines) {
+				content.WriteString(analysisLines[i])
+				content.WriteString("\n")
+			}
+		}
+
+		// Add scroll indicator at bottom
+		if endLine < len(analysisLines) {
+			content.WriteString(lipgloss.NewStyle().Foreground(colorGray).Render("↓ (more content below - use j/↓ to scroll down)"))
+		}
+
+	case "deployment":
+		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("🚀 Deploy Template"))
+		content.WriteString("\n\n")
+
+		content.WriteString(lipgloss.NewStyle().Foreground(colorGreen).Render("✅ Template created successfully!"))
+		content.WriteString("\n\n")
+		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render("Choose deployment action:"))
+		content.WriteString("\n\n")
+
+		deploymentOptions := []string{
+			"🔧 Initialize Terraform (terraform init)",
+			"📋 Plan Deployment (terraform plan)",
+			"🚀 Deploy Infrastructure (terraform apply)",
+			"📝 Edit Template Files",
+			"📁 Open in External Editor",
+			"🏠 Return to Main Menu",
+		}
+
+		for i, option := range deploymentOptions {
+			style := lipgloss.NewStyle().Foreground(fgMedium)
+			if i == m.terraformMenuIndex {
+				style = style.Foreground(fgLight).Bold(true)
+			}
+			prefix := "  "
+			if i == m.terraformMenuIndex {
+				prefix = "▶ "
+			}
+			content.WriteString(style.Render(prefix + option))
+			content.WriteString("\n")
+		}
 	}
 
 	content.WriteString("\n\n")
@@ -2385,6 +2711,108 @@ func (m model) renderTerraformPopup(background string) string {
 	}
 
 	// Create popup style - clean, no borders or backgrounds
+	popupStyle := lipgloss.NewStyle().
+		Foreground(fgLight).
+		Padding(1, 2).
+		Width(60).
+		Align(lipgloss.Center, lipgloss.Top)
+
+	styledPopup := popupStyle.Render(content.String())
+
+	// Overlay on background
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, styledPopup)
+}
+
+func (m model) renderSettingsPopup(background string) string {
+	var content strings.Builder
+
+	// Title
+	title := lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render("⚙️  Settings Manager")
+	content.WriteString(title)
+	content.WriteString("\n\n")
+
+	switch m.settingsMode {
+	case "menu":
+		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("Select an option:"))
+		content.WriteString("\n\n")
+
+		menuOptions := []string{
+			"📋 View Configuration",
+			"📁 Edit Terraform Directory",
+			"🎨 Edit UI Settings",
+			"📝 Edit Editor Settings",
+			"💾 Save Configuration",
+		}
+
+		for i, option := range menuOptions {
+			style := lipgloss.NewStyle().Foreground(fgMedium)
+			if i == m.settingsMenuIndex {
+				style = style.Foreground(fgLight).Bold(true)
+			}
+			prefix := "  "
+			if i == m.settingsMenuIndex {
+				prefix = "▶ "
+			}
+			content.WriteString(style.Render(prefix + option))
+			content.WriteString("\n")
+		}
+
+	case "config-view":
+		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("Current Configuration:"))
+		content.WriteString("\n\n")
+		content.WriteString(m.settingsConfigContent)
+
+	case "folder-browser":
+		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("Select Terraform Directory:"))
+		content.WriteString("\n\n")
+
+		for i, folder := range m.settingsFolders {
+			style := lipgloss.NewStyle().Foreground(fgMedium)
+			if i == m.settingsMenuIndex {
+				style = style.Foreground(fgLight).Bold(true)
+			}
+			prefix := "  "
+			if i == m.settingsMenuIndex {
+				prefix = "▶ "
+			}
+			content.WriteString(style.Render(prefix + folder))
+			content.WriteString("\n")
+		}
+
+	case "edit-setting":
+		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render(fmt.Sprintf("Editing: %s", m.settingsEditKey)))
+		content.WriteString("\n\n")
+		content.WriteString("Current Value:\n")
+		content.WriteString(lipgloss.NewStyle().Foreground(colorAqua).Render(m.settingsEditValue))
+		content.WriteString("\n\n")
+		content.WriteString(lipgloss.NewStyle().Italic(true).Foreground(colorGray).Render("Note: Direct editing not yet implemented"))
+	}
+
+	content.WriteString("\n\n")
+
+	// Add status bar with contextual shortcuts
+	shortcuts := m.getSettingsShortcuts()
+	statusbarStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("4")).
+		Foreground(lipgloss.Color("15")).
+		Bold(true).
+		Padding(0, 1).
+		Width(58)
+
+	content.WriteString(statusbarStyle.Render("Settings: " + shortcuts))
+	content.WriteString("\n")
+
+	// Footer text based on mode
+	switch m.settingsMode {
+	case "config-view":
+		content.WriteString(lipgloss.NewStyle().Italic(true).Foreground(colorGray).Render("Press Enter or Esc to return to menu"))
+	case "edit-setting":
+		content.WriteString(lipgloss.NewStyle().Italic(true).Foreground(colorGray).Render("Press Esc to return to menu"))
+	default:
+		content.WriteString(lipgloss.NewStyle().Italic(true).Foreground(colorGray).Render("Navigate: ↑/↓  Select: Enter  Back: Esc"))
+	}
+
+	// Create popup style
 	popupStyle := lipgloss.NewStyle().
 		Foreground(fgLight).
 		Padding(1, 2).
@@ -3806,6 +4234,88 @@ func copyTemplateFiles(src, dst string) error {
 	}
 
 	return nil
+}
+
+// =============================================================================
+// SETTINGS MANAGEMENT COMMANDS
+// =============================================================================
+
+// loadSettingsConfigCmd loads the current configuration
+func loadSettingsConfigCmd() tea.Cmd {
+	return func() tea.Msg {
+		cfg, err := config.LoadConfig()
+		if err != nil {
+			return settingsConfigLoadedMsg{
+				config:  nil,
+				content: fmt.Sprintf("Error loading config: %v", err),
+			}
+		}
+
+		// Format config content for display
+		content := fmt.Sprintf("Current Configuration:\n\n")
+		content += fmt.Sprintf("🔧 Terraform:\n")
+		content += fmt.Sprintf("  Workspace Path: %s\n", cfg.Terraform.WorkspacePath)
+		content += fmt.Sprintf("  Templates Path: %s\n", cfg.Terraform.TemplatesPath)
+		content += fmt.Sprintf("  Auto Format: %t\n", cfg.Terraform.AutoFormat)
+		content += fmt.Sprintf("\n🎨 UI:\n")
+		content += fmt.Sprintf("  Show Terraform Menu: %t\n", cfg.UI.ShowTerraformMenu)
+		content += fmt.Sprintf("  Popup Width: %d\n", cfg.UI.PopupWidth)
+		content += fmt.Sprintf("  Popup Height: %d\n", cfg.UI.PopupHeight)
+		content += fmt.Sprintf("  Enable Mouse Support: %t\n", cfg.UI.EnableMouseSupport)
+		content += fmt.Sprintf("\n📝 Editor:\n")
+		content += fmt.Sprintf("  Default Editor: %s\n", cfg.Editor.DefaultEditor)
+		content += fmt.Sprintf("  Temp Directory: %s\n", cfg.Editor.TempDir)
+
+		return settingsConfigLoadedMsg{
+			config:  cfg,
+			content: content,
+		}
+	}
+}
+
+// loadSettingsFoldersCmd loads available configuration paths for folder browser
+func loadSettingsFoldersCmd() tea.Cmd {
+	return func() tea.Msg {
+		folders := []string{
+			"~/.config/azure-tui",
+			"./terraform",
+			"./config",
+			"/tmp",
+			"~/Documents",
+		}
+
+		// Expand home directory
+		homeDir, err := os.UserHomeDir()
+		if err == nil {
+			for i, folder := range folders {
+				if strings.HasPrefix(folder, "~/") {
+					folders[i] = strings.Replace(folder, "~", homeDir, 1)
+				}
+			}
+		}
+
+		return settingsFoldersLoadedMsg{
+			folders: folders,
+		}
+	}
+}
+
+// saveSettingsConfigCmd saves the current configuration
+func saveSettingsConfigCmd(cfg *config.AppConfig) tea.Cmd {
+	return func() tea.Msg {
+		err := config.SaveConfig(cfg)
+		if err != nil {
+			return settingsConfigSavedMsg{
+				success: false,
+				message: fmt.Sprintf("Failed to save config: %v", err),
+			}
+		}
+
+		return settingsConfigSavedMsg{
+			success: true,
+			message: "Configuration saved successfully",
+		}
+	}
 }
 
 func main() {
