@@ -1,0 +1,82 @@
+# Azure TUI Configuration with Terraform Integration
+# Place this file at ~/.config/azure-tui/config.yaml
+
+# Naming conventions for Azure resources
+naming:
+  vm: "vm-{{env}}-{{name}}-{{region}}"
+  storage: "st{{env}}{{name}}{{random}}"
+  vnet: "vnet-{{env}}-{{name}}-{{region}}"
+  default: "{{env}}-{{name}}"
+
+# Environment setting
+env: "dev"
+
+# AI Configuration
+ai:
+  provider: "openai"  # or "azure_openai", "github_copilot"
+  model: "gpt-4"
+  confirm_before_write: true
+  confirm_before_deploy: true
+
+# Terraform Configuration
+terraform:
+  # Paths
+  workspace_path: "~/.config/azure-tui/terraform/workspaces"
+  templates_path: "./terraform/templates"
+  state_path: "~/.config/azure-tui/terraform/state"
+  
+  # Editor settings
+  default_editor: "nvim"  # or "vim", "code", "nano"
+  auto_save: true
+  auto_format: true
+  validate_on_save: true
+  
+  # Backend configuration
+  backend_type: "local"  # or "azurerm", "s3"
+  backend_config:
+    # For Azure backend:
+    # resource_group_name: "terraform-state-rg"
+    # storage_account_name: "terraformstate"
+    # container_name: "tfstate"
+    # key: "terraform.tfstate"
+  
+  # Module sources
+  module_sources:
+    - "registry.terraform.io"
+    - "github.com/Azure/terraform-azurerm-modules"
+  
+  # Default variable files
+  variable_files:
+    - "terraform.tfvars"
+    - "environments/dev.tfvars"
+
+# Editor Configuration
+editor:
+  default_editor: "nvim"
+  editor_args: ["+set number", "+set syntax=hcl"]
+  temp_dir: "/tmp"
+  file_extensions:
+    terraform: ".tf"
+    variables: ".tfvars"
+    output: ".tf"
+
+# UI Configuration
+ui:
+  show_terraform_menu: true
+  popup_width: 80
+  popup_height: 24
+  enable_mouse_support: true
+  color_scheme: "azure"
+  
+  # Terraform keyboard shortcuts
+  terraform_shortcuts:
+    "ctrl+t": "terraform_menu"
+    "ctrl+n": "new_terraform_file"
+    "ctrl+e": "edit_terraform_file"
+    "ctrl+p": "terraform_plan"
+    "ctrl+a": "terraform_apply"
+    "ctrl+d": "terraform_destroy"
+    "ctrl+s": "terraform_state"
+    "ctrl+i": "terraform_init"
+    "ctrl+f": "terraform_format"
+    "ctrl+v": "terraform_validate"

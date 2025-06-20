@@ -1,34 +1,198 @@
 package tfbicep
 
 import (
+	"bufio"
+	"bytes"
+	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
+	"time"
 )
 
-// Terraform
-func TerraformInit(dir string) error {
-	cmd := exec.Command("terraform", "init")
-	cmd.Dir = dir
-	return cmd.Run()
+// Enhanced Terraform Operations with better error handling and output capture
+
+// TerraformInit initializes a Terraform working directory
+func TerraformInit(dir string) (*TerraformOperation, error) {
+	return runTerraformCommand(dir, "init", []string{})
 }
 
-func TerraformPlan(dir string) error {
-	cmd := exec.Command("terraform", "plan")
-	cmd.Dir = dir
-	return cmd.Run()
+// TerraformPlan creates an execution plan
+func TerraformPlan(dir string) (*TerraformOperation, error) {
+	return runTerraformCommand(dir, "plan", []string{})
 }
 
-func TerraformApply(dir string) error {
-	cmd := exec.Command("terraform", "apply", "-auto-approve")
-	cmd.Dir = dir
-	return cmd.Run()
+// TerraformPlanWithOutput creates an execution plan and saves it to a file
+func TerraformPlanWithOutput(dir, planFile string) (*TerraformOperation, error) {
+	return runTerraformCommand(dir, "plan", []string{"-out", planFile})
 }
 
-func TerraformDestroy(dir string) error {
-	cmd := exec.Command("terraform", "destroy", "-auto-approve")
+// TerraformPlanJSON creates an execution plan in JSON format
+func TerraformPlanJSON(dir string) (*TerraformPlanResult, error) {
+	op, err := runTerraformCommand(dir, "plan", []string{"-json"})
+	if err != nil {
+		return nil, err
+	}
+
+	var plan TerraformPlanResult
+	if err := json.Unmarshal([]byte(op.Output), &plan); err != nil {
+		return nil, fmt.Errorf("failed to parse plan JSON: %w", err)
+	}
+
+	return &plan, nil
+}
+
+// TerraformApply applies the changes
+func TerraformApply(dir string) (*TerraformOperation, error) {
+	return runTerraformCommand(dir, "apply", []string{"-auto-approve"})
+}
+
+// TerraformApplyPlan applies a specific plan file
+func TerraformApplyPlan(dir, planFile string) (*TerraformOperation, error) {
+	return runTerraformCommand(dir, "apply", []string{planFile})
+}
+
+// TerraformDestroy destroys the infrastructure
+func TerraformDestroy(dir string) (*TerraformOperation, error) {
+	return runTerraformCommand(dir, "destroy", []string{"-auto-approve"})
+}
+
+// TerraformValidate validates the configuration
+func TerraformValidate(dir string) (*TerraformOperation, error) {
+	return runTerraformCommand(dir, "validate", []string{})
+}
+
+// TerraformFormat formats the configuration files
+func TerraformFormat(dir string) (*TerraformOperation, error) {
+	return runTerraformCommand(dir, "fmt", []string{"-recursive"})
+}
+
+// TerraformShow shows the current state or plan
+func TerraformShow(dir string) (*TerraformOperation, error) {
+	return runTerraformCommand(dir, "show", []string{})
+}
+
+// TerraformState performs state operations
+func TerraformState(dir, subcommand string, args []string) (*TerraformOperation, error) {
+	allArgs := append([]string{subcommand}, args...)
+	return runTerraformCommand(dir, "state", allArgs)
+}
+
+// TerraformOutput gets output values
+func TerraformOutput(dir string) (*TerraformOperation, error) {
+	return runTerraformCommand(dir, "output", []string{"-json"})
+}
+
+// TerraformRefresh refreshes the state
+func TerraformRefresh(dir string) (*TerraformOperation, error) {
+	return runTerraformCommand(dir, "refresh", []string{})
+}
+
+// TerraformImport imports existing resources
+func TerraformImport(dir, address, id string) (*TerraformOperation, error) {
+	return runTerraformCommand(dir, "import", []string{address, id})
+}
+
+// TerraformWorkspace manages workspaces
+func TerraformWorkspace(dir, subcommand string, args []string) (*TerraformOperation, error) {
+	allArgs := append([]string{subcommand}, args...)
+	return runTerraformCommand(dir, "workspace", allArgs)
+}
+
+// runTerraformCommand executes a Terraform command and captures detailed output
+func runTerraformCommand(dir, command string, args []string) (*TerraformOperation, error) {
+	start := time.Now()
+
+	cmdArgs := append([]string{command}, args...)
+	cmd := exec.Command("terraform", cmdArgs...)
 	cmd.Dir = dir
-	return cmd.Run()
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	err := cmd.Run()
+	duration := time.Since(start)
+
+	operation := &TerraformOperation{
+		Command:   fmt.Sprintf("terraform %s", strings.Join(cmdArgs, " ")),
+		Directory: dir,
+		Output:    stdout.String(),
+		Error:     stderr.String(),
+		Duration:  duration,
+		Success:   err == nil,
+	}
+
+	if exitError, ok := err.(*exec.ExitError); ok {
+		operation.ExitCode = exitError.ExitCode()
+	}
+
+	return operation, err
+}
+
+// GetTerraformState reads and parses the current Terraform state
+func GetTerraformState(dir string) (*TerraformStateInfo, error) {
+	statePath := filepath.Join(dir, "terraform.tfstate")
+
+	data, err := os.ReadFile(statePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read state file: %w", err)
+	}
+
+	var state TerraformStateInfo
+	if err := json.Unmarshal(data, &state); err != nil {
+		return nil, fmt.Errorf("failed to parse state JSON: %w", err)
+	}
+
+	return &state, nil
+}
+
+// ValidateTerraformConfig validates a Terraform configuration
+func ValidateTerraformConfig(dir string) (bool, []string, error) {
+	op, err := TerraformValidate(dir)
+	if err != nil {
+		return false, nil, err
+	}
+
+	var issues []string
+	if !op.Success {
+		scanner := bufio.NewScanner(strings.NewReader(op.Error))
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line != "" {
+				issues = append(issues, line)
+			}
+		}
+	}
+
+	return op.Success, issues, nil
+}
+
+// FormatTerraformFiles formats all Terraform files in a directory
+func FormatTerraformFiles(dir string) error {
+	op, err := TerraformFormat(dir)
+	if err != nil {
+		return fmt.Errorf("terraform format failed: %s", op.Error)
+	}
+	return nil
+}
+
+// CheckTerraformVersion checks if Terraform is installed and gets version
+func CheckTerraformVersion() (string, error) {
+	cmd := exec.Command("terraform", "version")
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("terraform not found or not executable: %w", err)
+	}
+
+	lines := strings.Split(string(output), "\n")
+	if len(lines) > 0 {
+		return strings.TrimSpace(lines[0]), nil
+	}
+
+	return "", fmt.Errorf("unable to parse terraform version")
 }
 
 // Bicep

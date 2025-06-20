@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,8 +19,10 @@ import (
 	"github.com/olafkfreund/azure-tui/internal/azure/resourceactions"
 	"github.com/olafkfreund/azure-tui/internal/azure/resourcedetails"
 	"github.com/olafkfreund/azure-tui/internal/azure/storage"
+	"github.com/olafkfreund/azure-tui/internal/azure/tfbicep"
 	"github.com/olafkfreund/azure-tui/internal/openai"
 	"github.com/olafkfreund/azure-tui/internal/search"
+	"github.com/olafkfreund/azure-tui/internal/terraform"
 	"github.com/olafkfreund/azure-tui/internal/tui"
 )
 
@@ -120,6 +123,20 @@ type keyVaultSecretActionMsg struct {
 	result resourceactions.ActionResult
 }
 
+// Terraform message types
+type terraformFoldersLoadedMsg struct {
+	folders []string
+}
+type terraformAnalysisMsg struct {
+	analysis string
+	path     string
+}
+type terraformOperationMsg struct {
+	operation string
+	result    string
+	success   bool
+}
+
 // Storage Account message types
 type storageContainersMsg struct {
 	accountName string
@@ -207,6 +224,16 @@ type model struct {
 	showSearchResults bool
 	searchHistory     []string
 	filteredResources []AzureResource
+
+	// Terraform integration
+	showTerraformPopup   bool
+	terraformMenuIndex   int
+	terraformMode        string // "menu", "folder-select", "templates", "workspaces", "operations"
+	terraformFolderPath  string
+	terraformMenuOptions []string
+	terraformFolders     []string
+	terraformAnalysis    string
+	terraformMenuAction  string // Track the original menu action for folder selection
 }
 
 // Helper functions for search functionality
@@ -447,6 +474,68 @@ func (m *model) renderSearchResults(width, height int) string {
 	}
 
 	return content.String()
+}
+
+// handleTerraformMenuSelection handles the selection from the Terraform menu
+func (m *model) handleTerraformMenuSelection() (tea.Model, tea.Cmd) {
+	switch m.terraformMode {
+	case "menu":
+		switch m.terraformMenuIndex {
+		case 0: // Browse Folders
+			if len(m.terraformFolders) > 0 {
+				m.terraformMode = "folder-select"
+				m.terraformMenuIndex = 0
+				m.terraformMenuAction = "browse"
+			}
+		case 1: // Create from Template
+			if len(m.terraformFolders) > 0 {
+				m.terraformMode = "folder-select"
+				m.terraformMenuIndex = 0
+				m.terraformMenuAction = "template"
+			}
+		case 2: // Analyze Code
+			if len(m.terraformFolders) > 0 {
+				m.terraformMode = "folder-select"
+				m.terraformMenuIndex = 0
+				m.terraformMenuAction = "analyze"
+			}
+		case 3: // Terraform Operations
+			if len(m.terraformFolders) > 0 {
+				m.terraformMode = "folder-select"
+				m.terraformMenuIndex = 0
+				m.terraformMenuAction = "operations"
+			}
+		case 4: // Open External Editor
+			if len(m.terraformFolders) > 0 {
+				m.terraformMode = "folder-select"
+				m.terraformMenuIndex = 0
+				m.terraformMenuAction = "editor"
+			}
+		}
+	case "folder-select":
+		if m.terraformMenuIndex < len(m.terraformFolders) {
+			selectedFolder := m.terraformFolders[m.terraformMenuIndex]
+			m.showTerraformPopup = false
+
+			// Perform different actions based on original menu selection
+			switch m.terraformMenuAction {
+			case "analyze":
+				return *m, analyzeTerraformCodeCmd(selectedFolder)
+			case "operations":
+				// Show operations submenu or execute default operation
+				return *m, executeTerraformOperationCmd("validate", selectedFolder)
+			case "editor":
+				// Open external editor (e.g., code, vim)
+				return *m, openTerraformEditorCmd(selectedFolder)
+			case "template":
+				// Implement template creation workflow
+				return *m, createFromTemplateCmd(selectedFolder)
+			default:
+				return *m, analyzeTerraformCodeCmd(selectedFolder)
+			}
+		}
+	}
+	return *m, nil
 }
 
 // min returns the minimum of two integers
@@ -1184,6 +1273,34 @@ func (m model) getContextualShortcuts() string {
 	return strings.Join(shortcuts, " ")
 }
 
+// getTerraformShortcuts returns relevant shortcuts based on the current Terraform mode
+func (m model) getTerraformShortcuts() string {
+	var shortcuts []string
+
+	switch m.terraformMode {
+	case "menu":
+		shortcuts = append(shortcuts, []string{
+			"↑/↓:Navigate", "Enter:Select", "Esc:Close",
+		}...)
+
+	case "folder-select":
+		shortcuts = append(shortcuts, []string{
+			"↑/↓:Navigate", "Enter:Select", "Esc:Back",
+		}...)
+
+	case "analysis":
+		shortcuts = append(shortcuts, []string{
+			"Enter:Back", "Esc:Close",
+		}...)
+	}
+
+	// Always available shortcuts
+	baseShortcuts := []string{"Ctrl+T:Menu", "?:Help"}
+	shortcuts = append(shortcuts, baseShortcuts...)
+
+	return strings.Join(shortcuts, " ")
+}
+
 func initModel() model {
 	// Initialize AI provider with auto-detection (GitHub Copilot or OpenAI)
 	ai := openai.NewAIProviderAuto()
@@ -1214,6 +1331,21 @@ func initModel() model {
 		showSearchResults: false,
 		searchHistory:     []string{},
 		filteredResources: []AzureResource{},
+		// Initialize Terraform functionality
+		showTerraformPopup:  false,
+		terraformMenuIndex:  0,
+		terraformMode:       "menu",
+		terraformFolderPath: "",
+		terraformMenuOptions: []string{
+			"Browse Folders",
+			"Create from Template",
+			"Analyze Code",
+			"Terraform Operations",
+			"Open External Editor",
+		},
+		terraformFolders:    []string{},
+		terraformAnalysis:   "",
+		terraformMenuAction: "",
 	}
 }
 
@@ -1394,6 +1526,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+	// Terraform message handlers
+	case terraformFoldersLoadedMsg:
+		m.terraformFolders = msg.folders
+
+	case terraformAnalysisMsg:
+		m.terraformAnalysis = msg.analysis
+		m.terraformFolderPath = msg.path
+		m.terraformMode = "analysis"
+		m.showTerraformPopup = true
+
+	case terraformOperationMsg:
+		m.actionInProgress = false
+		status := "Success"
+		if !msg.success {
+			status = "Failed"
+		}
+		m.logEntries = append(m.logEntries, fmt.Sprintf("Terraform %s: %s - %s", msg.operation, status, msg.result))
+
 	case errorMsg:
 		m.loadingState = "error"
 
@@ -1449,12 +1599,58 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Handle Terraform popup navigation
+		if m.showTerraformPopup {
+			switch msg.String() {
+			case "escape":
+				if m.terraformMode == "analysis" {
+					// Go back to menu from analysis
+					m.terraformMode = "menu"
+					m.terraformMenuIndex = 0
+				} else {
+					m.showTerraformPopup = false
+				}
+			case "enter":
+				if m.terraformMode == "analysis" {
+					// Go back to menu from analysis
+					m.terraformMode = "menu"
+					m.terraformMenuIndex = 0
+				} else {
+					return m.handleTerraformMenuSelection()
+				}
+			case "j", "down":
+				if m.terraformMode == "menu" {
+					m.terraformMenuIndex = (m.terraformMenuIndex + 1) % len(m.terraformMenuOptions)
+				} else if m.terraformMode == "folder-select" {
+					m.terraformMenuIndex = (m.terraformMenuIndex + 1) % len(m.terraformFolders)
+				}
+			case "k", "up":
+				if m.terraformMode == "menu" {
+					m.terraformMenuIndex = (m.terraformMenuIndex - 1 + len(m.terraformMenuOptions)) % len(m.terraformMenuOptions)
+				} else if m.terraformMode == "folder-select" {
+					m.terraformMenuIndex = (m.terraformMenuIndex - 1 + len(m.terraformFolders)) % len(m.terraformFolders)
+				}
+			}
+			return m, nil
+		}
+
 		// Regular key handling when not in search mode
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
 		case "tab":
 			m.selectedPanel = (m.selectedPanel + 1) % 2
+
+		// Terraform Integration - Primary Access Key
+		case "ctrl+t":
+			if !m.showTerraformPopup {
+				m.showTerraformPopup = true
+				m.terraformMenuIndex = 0
+				return m, loadTerraformFoldersCmd()
+			} else {
+				m.showTerraformPopup = false
+			}
+
 		case "left", "h":
 			// Left navigation - switch to tree panel or previous section
 			if m.selectedPanel == 1 {
@@ -1895,6 +2091,7 @@ func (m model) View() string {
 				if len(m.searchResults) > 0 {
 					m.statusBar.AddSegment(fmt.Sprintf("Result %d/%d", m.searchResultIndex+1, len(m.searchResults)), colorPurple, bgMedium)
 				}
+				m.statusBar.AddSegment("Enter:Select", colorGray, bgLight)
 			}
 		} else {
 			m.statusBar.AddSegment("/:Search", colorGray, bgLight)
@@ -2040,6 +2237,14 @@ func (m model) View() string {
 		helpContent.WriteString("C          Create VNet\n")
 		helpContent.WriteString("Ctrl+N     Create NSG\n\n")
 
+		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorAqua).Render("🏗️  Terraform Management:"))
+		helpContent.WriteString("\n")
+		helpContent.WriteString("Ctrl+T     Open Terraform Manager\n")
+		helpContent.WriteString("           - Browse Terraform projects\n")
+		helpContent.WriteString("           - Analyze code\n")
+		helpContent.WriteString("           - Execute operations\n")
+		helpContent.WriteString("           - Create from templates\n\n")
+
 		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorPurple).Render("🐳 Container Management:"))
 		helpContent.WriteString("\n")
 		helpContent.WriteString("L          Get Container Logs\n")
@@ -2087,7 +2292,109 @@ func (m model) View() string {
 		return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, styledPopup)
 	}
 
+	// Render Terraform popup if active
+	if m.showTerraformPopup {
+		return m.renderTerraformPopup(fullView)
+	}
+
 	return lipgloss.NewStyle().Background(bgDark).Render(fullView)
+}
+
+func (m model) renderTerraformPopup(background string) string {
+	var content strings.Builder
+
+	// Title
+	title := lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render("🏗️  Terraform Manager")
+	content.WriteString(title)
+	content.WriteString("\n\n")
+
+	switch m.terraformMode {
+	case "menu":
+		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("Select an option:"))
+		content.WriteString("\n\n")
+
+		for i, option := range m.terraformMenuOptions {
+			style := lipgloss.NewStyle().Foreground(fgMedium)
+			if i == m.terraformMenuIndex {
+				style = style.Foreground(fgLight).Bold(true)
+			}
+			prefix := "  "
+			if i == m.terraformMenuIndex {
+				prefix = "▶ "
+			}
+			content.WriteString(style.Render(prefix + option))
+			content.WriteString("\n")
+		}
+
+	case "folder-select":
+		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("Select a Terraform project folder:"))
+		content.WriteString("\n\n")
+
+		if len(m.terraformFolders) == 0 {
+			content.WriteString(lipgloss.NewStyle().Foreground(colorYellow).Render("No Terraform projects found (.tf files)"))
+			content.WriteString("\n")
+			content.WriteString(lipgloss.NewStyle().Faint(true).Render("Create a .tf file in any directory to get started"))
+		} else {
+			for i, folder := range m.terraformFolders {
+				style := lipgloss.NewStyle().Foreground(fgMedium)
+				if i == m.terraformMenuIndex {
+					style = style.Foreground(fgLight).Bold(true)
+				}
+				prefix := "  "
+				if i == m.terraformMenuIndex {
+					prefix = "▶ "
+				}
+
+				// Show relative path for better display
+				displayPath := folder
+				if folder == "." {
+					displayPath = "current directory"
+				}
+
+				content.WriteString(style.Render(prefix + "📁 " + displayPath))
+				content.WriteString("\n")
+			}
+		}
+
+	case "analysis":
+		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render(fmt.Sprintf("Code Analysis: %s", m.terraformFolderPath)))
+		content.WriteString("\n\n")
+		content.WriteString(m.terraformAnalysis)
+	}
+
+	content.WriteString("\n\n")
+
+	// Add statusbar with contextual shortcuts
+	shortcuts := m.getTerraformShortcuts()
+	statusbarStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("4")).
+		Foreground(lipgloss.Color("15")).
+		Bold(true).
+		Padding(0, 1).
+		Width(58)
+
+	content.WriteString(statusbarStyle.Render("Terraform: " + shortcuts))
+	content.WriteString("\n")
+
+	// Different footer text based on mode (kept for additional context)
+	switch m.terraformMode {
+	case "analysis":
+		content.WriteString(lipgloss.NewStyle().Italic(true).Foreground(colorGray).Render("Press Enter or Esc to return to menu"))
+	default:
+		content.WriteString(lipgloss.NewStyle().Italic(true).Foreground(colorGray).Render("Navigate: ↑/↓  Select: Enter  Back: Esc"))
+	}
+
+	// Create popup style - clean, no borders or backgrounds
+	popupStyle := lipgloss.NewStyle().
+		Foreground(fgLight).
+		Padding(1, 2).
+		Width(60).
+		Align(lipgloss.Center, lipgloss.Top)
+
+	styledPopup := popupStyle.Render(content.String())
+
+	// Overlay on background
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, styledPopup)
 }
 
 func (m model) renderResourcePanel(width, height int) string {
@@ -2978,6 +3285,527 @@ func createShortcutsMap() map[string]string {
 		"Esc": "Navigate back / Close dialogs",
 		"q":   "Quit application",
 	}
+}
+
+// Terraform Commands
+func loadTerraformFoldersCmd() tea.Cmd {
+	return func() tea.Msg {
+		// Scan for folders with .tf files
+		folders, err := scanTerraformProjects(".")
+		if err != nil {
+			return errorMsg{error: fmt.Sprintf("Failed to load Terraform folders: %v", err)}
+		}
+		return terraformFoldersLoadedMsg{folders: folders}
+	}
+}
+
+func scanTerraformProjects(rootDir string) ([]string, error) {
+	var folders []string
+
+	err := filepath.Walk(rootDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if strings.HasSuffix(path, ".tf") {
+			dir := filepath.Dir(path)
+			// Check if we already added this directory
+			found := false
+			for _, folder := range folders {
+				if folder == dir {
+					found = true
+					break
+				}
+			}
+			if !found {
+				folders = append(folders, dir)
+			}
+		}
+		return nil
+	})
+
+	return folders, err
+}
+
+func analyzeTerraformCodeCmd(folderPath string) tea.Cmd {
+	return func() tea.Msg {
+		analysis, err := analyzeTerraformCode(folderPath)
+		if err != nil {
+			return errorMsg{error: fmt.Sprintf("Failed to analyze Terraform code: %v", err)}
+		}
+		return terraformAnalysisMsg{analysis: analysis, path: folderPath}
+	}
+}
+
+func analyzeTerraformCode(folderPath string) (string, error) {
+	// Start with basic project analysis
+	analysis := fmt.Sprintf("📁 Terraform Project Analysis: %s\n\n", folderPath)
+
+	// Check for main files and gather content
+	files := []string{"main.tf", "variables.tf", "outputs.tf", "terraform.tf"}
+	foundFiles := make(map[string]bool)
+	terraformContent := strings.Builder{}
+
+	for _, file := range files {
+		filePath := filepath.Join(folderPath, file)
+		if _, err := os.Stat(filePath); err == nil {
+			analysis += fmt.Sprintf("✅ %s found\n", file)
+			foundFiles[file] = true
+
+			// Read file content for AI analysis
+			if content, readErr := os.ReadFile(filePath); readErr == nil {
+				terraformContent.WriteString(fmt.Sprintf("\n--- %s ---\n", file))
+				// Limit content size for AI analysis (first 2000 chars per file)
+				contentStr := string(content)
+				if len(contentStr) > 2000 {
+					contentStr = contentStr[:2000] + "... (truncated)"
+				}
+				terraformContent.WriteString(contentStr)
+			}
+		} else {
+			analysis += fmt.Sprintf("❌ %s missing\n", file)
+		}
+	}
+
+	// Try to get AI-powered analysis if available
+	aiProvider := openai.NewAIProviderAuto()
+	if aiProvider != nil && terraformContent.Len() > 0 {
+		analysis += "\n🤖 AI Analysis:\n"
+		analysis += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+
+		prompt := fmt.Sprintf(`As a senior Azure infrastructure expert, analyze this Terraform project and provide:
+
+1. **Code Quality Assessment:**
+   - Syntax and structure quality
+   - Terraform best practices compliance
+   - Resource naming conventions
+
+2. **Security Analysis:**
+   - Security vulnerabilities or risks
+   - Missing security configurations
+   - Recommended security improvements
+
+3. **Azure-Specific Recommendations:**
+   - Optimal Azure resource configurations
+   - Cost optimization opportunities
+   - Performance and scalability considerations
+
+4. **Best Practices & Improvements:**
+   - Missing essential configurations
+   - State management recommendations
+   - Testing and validation suggestions
+
+5. **Next Steps:**
+   - Prioritized action items
+   - Quick wins for improvement
+
+Project Files:
+%s
+
+Provide specific, actionable recommendations focused on Azure cloud best practices. Keep analysis professional and concise.`, terraformContent.String())
+
+		aiAnalysis, err := aiProvider.Ask(prompt, "Azure Terraform Expert Analysis")
+		if err != nil {
+			analysis += fmt.Sprintf("⚠️ AI analysis unavailable: %v\n", err)
+		} else {
+			analysis += aiAnalysis + "\n"
+		}
+		analysis += "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+	} else if aiProvider == nil {
+		analysis += "\n💡 For enhanced AI analysis, set OPENAI_API_KEY or GITHUB_TOKEN environment variable.\n"
+	}
+
+	// Enhanced project health assessment
+	analysis += "\n📊 Project Health Assessment:\n"
+	score := 0
+	total := 4
+	for _, found := range foundFiles {
+		if found {
+			score++
+		}
+	}
+
+	// Detailed file assessment
+	analysis += "Files Status:\n"
+	for _, file := range files {
+		if foundFiles[file] {
+			analysis += fmt.Sprintf("  ✅ %s - Present\n", file)
+		} else {
+			analysis += fmt.Sprintf("  ❌ %s - Missing\n", file)
+		}
+	}
+
+	analysis += fmt.Sprintf("\nOverall Completeness: %d/%d files (%d%%)\n", score, total, (score*100)/total)
+
+	// Enhanced health recommendations
+	if score >= 3 {
+		analysis += "✅ Good project structure - Ready for deployment\n"
+		if score == 4 {
+			analysis += "🎉 Complete Terraform project structure!\n"
+		}
+	} else if score >= 2 {
+		analysis += "⚠️ Basic project structure - Consider adding missing files:\n"
+		if !foundFiles["variables.tf"] {
+			analysis += "  • variables.tf: Define input variables for flexibility\n"
+		}
+		if !foundFiles["outputs.tf"] {
+			analysis += "  • outputs.tf: Export important resource information\n"
+		}
+		if !foundFiles["terraform.tf"] {
+			analysis += "  • terraform.tf: Define provider requirements and versions\n"
+		}
+	} else {
+		analysis += "❌ Incomplete project structure - Missing critical files\n"
+		analysis += "  💡 Consider using 'Create from Template' to generate a complete structure\n"
+	}
+
+	// Additional checks for common files
+	additionalFiles := []string{"README.md", "terraform.tfvars.example", ".gitignore"}
+	foundAdditional := false
+	for _, file := range additionalFiles {
+		if _, err := os.Stat(filepath.Join(folderPath, file)); err == nil {
+			if !foundAdditional {
+				analysis += "\n📋 Additional Files Found:\n"
+				foundAdditional = true
+			}
+			analysis += fmt.Sprintf("  ✅ %s\n", file)
+		}
+	}
+
+	analysis += "\n🔧 Available Actions:\n"
+	analysis += "  • Terraform Operations: validate, plan, apply, destroy\n"
+	analysis += "  • Open External Editor: Edit files in VS Code/vim\n"
+	analysis += "  • Create from Template: Generate missing structure\n"
+
+	return analysis, nil
+}
+
+func executeTerraformOperationCmd(operation string, workspacePath string) tea.Cmd {
+	return func() tea.Msg {
+		var result string
+		var err error
+
+		// Ensure we're in the correct directory
+		if _, statErr := os.Stat(workspacePath); os.IsNotExist(statErr) {
+			return terraformOperationMsg{
+				operation: operation,
+				result:    fmt.Sprintf("Directory not found: %s", workspacePath),
+				success:   false,
+			}
+		}
+
+		switch operation {
+		case "init":
+			// Use the terraform package function
+			err = terraform.InitWorkspace(workspacePath)
+			if err == nil {
+				result = "✅ Terraform initialized successfully"
+			}
+		case "plan":
+			// Use the terraform package function
+			result, err = terraform.PlanWorkspace(workspacePath, "")
+			if err == nil && result != "" {
+				result = "✅ Terraform plan completed successfully:\n" + result
+			}
+		case "apply":
+			// Use the terraform package function
+			result, err = terraform.ApplyWorkspace(workspacePath, "", true)
+			if err == nil && result != "" {
+				result = "✅ Terraform apply completed successfully:\n" + result
+			}
+		case "destroy":
+			// Use the terraform package function
+			result, err = terraform.DestroyWorkspace(workspacePath, "", true)
+			if err == nil && result != "" {
+				result = "✅ Terraform destroy completed successfully:\n" + result
+			}
+		case "validate":
+			// Use the enhanced tfbicep package for better error handling
+			valid, issues, validationErr := tfbicep.ValidateTerraformConfig(workspacePath)
+			if validationErr != nil {
+				err = validationErr
+			} else if !valid {
+				result = "❌ Terraform validation failed:\n" + strings.Join(issues, "\n")
+				err = fmt.Errorf("validation failed")
+			} else {
+				result = "✅ Terraform configuration is valid"
+			}
+		case "format":
+			// Use the enhanced tfbicep package for formatting
+			formatErr := tfbicep.FormatTerraformFiles(workspacePath)
+			if formatErr != nil {
+				err = formatErr
+			} else {
+				result = "✅ Terraform files formatted successfully"
+			}
+		case "show":
+			// Show current state or plan
+			op, showErr := tfbicep.TerraformShow(workspacePath)
+			if showErr != nil {
+				err = showErr
+			} else {
+				result = "📋 Terraform show output:\n" + op.Output
+			}
+		case "state":
+			// Show state list
+			op, stateErr := tfbicep.TerraformState(workspacePath, "list", []string{})
+			if stateErr != nil {
+				err = stateErr
+			} else {
+				result = "📊 Terraform state resources:\n" + op.Output
+			}
+		default:
+			err = fmt.Errorf("unknown operation: %s", operation)
+		}
+
+		success := err == nil
+		if err != nil {
+			result = fmt.Sprintf("❌ %s failed: %v", operation, err)
+		}
+
+		return terraformOperationMsg{
+			operation: operation,
+			result:    result,
+			success:   success,
+		}
+	}
+}
+
+func openTerraformEditorCmd(folderPath string) tea.Cmd {
+	return func() tea.Msg {
+		// Try to open with VS Code first, then fall back to other editors
+		editors := []string{"code", "vim", "nvim", "nano"}
+
+		for _, editor := range editors {
+			cmd := exec.Command(editor, folderPath)
+			if err := cmd.Start(); err == nil {
+				// Successfully started editor
+				return terraformOperationMsg{
+					operation: "editor",
+					result:    fmt.Sprintf("Opened %s in %s", folderPath, editor),
+					success:   true,
+				}
+			}
+		}
+
+		return errorMsg{error: "No suitable editor found (tried: code, vim, nvim, nano)"}
+	}
+}
+
+func createFromTemplateCmd(folderPath string) tea.Cmd {
+	return func() tea.Msg {
+		// Use the existing template system to create a project from a template
+		templatesPath := "./terraform/templates"
+
+		// Check if templates directory exists
+		if _, err := os.Stat(templatesPath); os.IsNotExist(err) {
+			return terraformOperationMsg{
+				operation: "template",
+				result:    "❌ Templates directory not found. Please ensure terraform/templates exists.",
+				success:   false,
+			}
+		}
+
+		// For now, use the linux-vm template as default (can be enhanced to show selection menu)
+		templateSource := filepath.Join(templatesPath, "vm", "linux-vm")
+
+		// Check if the specific template exists
+		if _, err := os.Stat(templateSource); os.IsNotExist(err) {
+			// Fallback to creating a basic template
+			return createBasicTemplate(folderPath)
+		}
+
+		// Copy template files to target directory
+		err := copyTemplateFiles(templateSource, folderPath)
+		if err != nil {
+			return terraformOperationMsg{
+				operation: "template",
+				result:    fmt.Sprintf("❌ Failed to create template: %v", err),
+				success:   false,
+			}
+		}
+
+		return terraformOperationMsg{
+			operation: "template",
+			result:    fmt.Sprintf("✅ Linux VM template created successfully in %s\n\nFiles created:\n- main.tf\n- variables.tf\n- outputs.tf\n- terraform.tf\n\nNext steps:\n1. Customize variables in variables.tf\n2. Run 'terraform init'\n3. Run 'terraform plan'\n4. Run 'terraform apply'", folderPath),
+			success:   true,
+		}
+	}
+}
+
+// createBasicTemplate creates a basic template when no predefined templates are available
+func createBasicTemplate(folderPath string) terraformOperationMsg {
+	templateContent := `# Basic Azure Resource Group and Storage Account Template
+# Generated by Azure TUI
+
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~>3.0"
+    }
+  }
+}
+
+provider "azurerm" {
+  features {}
+}
+
+resource "azurerm_resource_group" "main" {
+  name     = var.resource_group_name
+  location = var.location
+
+  tags = {
+    Environment = var.environment
+    Project     = var.project_name
+  }
+}
+
+resource "azurerm_storage_account" "main" {
+  name                     = var.storage_account_name
+  resource_group_name      = azurerm_resource_group.main.name
+  location                 = azurerm_resource_group.main.location
+  account_tier             = "Standard"
+  account_replication_type = "LRS"
+
+  tags = {
+    Environment = var.environment
+    Project     = var.project_name
+  }
+}
+`
+
+	variablesContent := `# Variables for basic Azure template
+
+variable "resource_group_name" {
+  description = "Name of the resource group"
+  type        = string
+  default     = "azure-tui-rg"
+}
+
+variable "location" {
+  description = "Azure region for resources"
+  type        = string
+  default     = "East US"
+}
+
+variable "storage_account_name" {
+  description = "Name of the storage account (must be globally unique)"
+  type        = string
+  default     = "azuretui${random_integer.suffix.result}"
+}
+
+variable "environment" {
+  description = "Environment name"
+  type        = string
+  default     = "dev"
+}
+
+variable "project_name" {
+  description = "Project name for tagging"
+  type        = string
+  default     = "azure-tui-project"
+}
+
+resource "random_integer" "suffix" {
+  min = 1000
+  max = 9999
+}
+`
+
+	outputsContent := `# Outputs for basic Azure template
+
+output "resource_group_name" {
+  description = "Name of the created resource group"
+  value       = azurerm_resource_group.main.name
+}
+
+output "resource_group_id" {
+  description = "ID of the created resource group"
+  value       = azurerm_resource_group.main.id
+}
+
+output "storage_account_name" {
+  description = "Name of the created storage account"
+  value       = azurerm_storage_account.main.name
+}
+
+output "storage_account_primary_endpoint" {
+  description = "Primary blob endpoint of the storage account"
+  value       = azurerm_storage_account.main.primary_blob_endpoint
+}
+`
+
+	// Create main.tf
+	if err := os.WriteFile(filepath.Join(folderPath, "main.tf"), []byte(templateContent), 0644); err != nil {
+		return terraformOperationMsg{
+			operation: "template",
+			result:    fmt.Sprintf("❌ Failed to create main.tf: %v", err),
+			success:   false,
+		}
+	}
+
+	// Create variables.tf
+	if err := os.WriteFile(filepath.Join(folderPath, "variables.tf"), []byte(variablesContent), 0644); err != nil {
+		return terraformOperationMsg{
+			operation: "template",
+			result:    fmt.Sprintf("❌ Failed to create variables.tf: %v", err),
+			success:   false,
+		}
+	}
+
+	// Create outputs.tf
+	if err := os.WriteFile(filepath.Join(folderPath, "outputs.tf"), []byte(outputsContent), 0644); err != nil {
+		return terraformOperationMsg{
+			operation: "template",
+			result:    fmt.Sprintf("❌ Failed to create outputs.tf: %v", err),
+			success:   false,
+		}
+	}
+
+	return terraformOperationMsg{
+		operation: "template",
+		result:    fmt.Sprintf("✅ Basic template created successfully in %s\n\nFiles created:\n- main.tf (Resource Group & Storage Account)\n- variables.tf (Configurable variables)\n- outputs.tf (Resource outputs)\n\nNext steps:\n1. Customize variables in variables.tf\n2. Run 'terraform init'\n3. Run 'terraform plan'\n4. Run 'terraform apply'", folderPath),
+		success:   true,
+	}
+}
+
+// copyTemplateFiles copies template files from source to destination
+func copyTemplateFiles(src, dst string) error {
+	// Ensure destination directory exists
+	if err := os.MkdirAll(dst, 0755); err != nil {
+		return err
+	}
+
+	// Read source directory
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		if entry.IsDir() {
+			// Skip subdirectories for now (can be enhanced later)
+			continue
+		}
+
+		// Only copy .tf files and README
+		if strings.HasSuffix(entry.Name(), ".tf") || entry.Name() == "README.md" {
+			content, err := os.ReadFile(srcPath)
+			if err != nil {
+				return fmt.Errorf("failed to read %s: %v", srcPath, err)
+			}
+
+			if err := os.WriteFile(dstPath, content, 0644); err != nil {
+				return fmt.Errorf("failed to write %s: %v", dstPath, err)
+			}
+		}
+	}
+
+	return nil
 }
 
 func main() {

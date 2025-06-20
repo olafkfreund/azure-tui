@@ -478,6 +478,255 @@ Network Profile:
 
 ---
 
+## Terraform Integration 🏗️
+
+Azure TUI includes a comprehensive Terraform integration that allows you to manage Infrastructure as Code directly from the TUI interface. Access it with `Ctrl+T`.
+
+### Key Features
+
+- **Project Discovery**: Automatically finds Terraform projects in your workspace
+- **Code Analysis**: Validates and analyzes Terraform configurations
+- **Operations**: Execute terraform init, plan, apply, validate, format, destroy
+- **Template Management**: Create new projects from predefined templates
+- **Editor Integration**: Open projects in your preferred editor (VS Code, vim, nvim)
+
+### Available Templates
+
+Azure TUI includes production-ready Terraform templates for:
+
+- **Linux VMs**: Complete virtual machine setup with networking, security groups, and SSH access
+- **Azure Kubernetes Service (AKS)**: Managed Kubernetes clusters with monitoring and logging
+- **Azure SQL Server**: SQL Server instances with databases, security, and Key Vault integration
+- **Container Instances (ACI)**: Both single and multi-container deployments
+- **Multi-Container Apps**: Complex containerized applications with load balancing
+
+### Real-World Examples
+
+#### Example 1: Analyzing an Existing Terraform Project
+
+**Scenario**: You have a Terraform project for a web application infrastructure and want to validate it.
+
+1. **Open Terraform Manager**: Press `Ctrl+T`
+2. **Select "Analyze Code"**: Navigate with ↑/↓, press Enter
+3. **Choose Project**: Select your web-app terraform folder
+4. **View Analysis**: See validation results and file structure
+
+**What you'll see**:
+```
+📁 Terraform Project Analysis: ./web-app-infrastructure
+
+✅ main.tf found
+✅ variables.tf found  
+✅ outputs.tf found
+❌ terraform.tf missing
+
+🔍 Use Terraform operations to validate and manage this project.
+```
+
+#### Example 2: Creating a New AKS Cluster
+
+**Scenario**: You need to deploy a new Kubernetes cluster for a staging environment.
+
+1. **Open Terraform Manager**: Press `Ctrl+T`
+2. **Create from Template**: Select "Create from Template"
+3. **Choose AKS Template**: Select the basic-aks template
+4. **Customize Variables**: Edit variables for your staging environment
+
+**Template includes**:
+- AKS cluster with system-assigned managed identity
+- Default node pool with configurable VM sizes
+- Azure Container Registry integration
+- Log Analytics workspace for monitoring
+- Network security groups and subnets
+
+#### Example 3: Validating Multi-Container Application
+
+**Scenario**: You're deploying a microservices application using Azure Container Instances.
+
+1. **Navigate to Project**: Use file explorer or `Ctrl+T` → "Browse Folders"
+2. **Select multi-container project**: Choose your microservices folder
+3. **Run Validation**: Select "Terraform Operations" → Validate
+4. **Check Results**: Review validation output for errors
+
+**Multi-container template features**:
+- Web frontend (nginx) on port 80
+- API backend (custom app) on port 8080
+- Health checks and readiness probes
+- Environment variable configuration
+- Log Analytics integration
+
+#### Example 4: Infrastructure Code Review Workflow
+
+**Scenario**: Team code review process for infrastructure changes.
+
+1. **Analyze Code**: `Ctrl+T` → "Analyze Code" → Select project
+2. **Validate Syntax**: `Ctrl+T` → "Terraform Operations" → Select project → Validate
+3. **Format Code**: Run terraform format to ensure consistent styling
+4. **Open in Editor**: `Ctrl+T` → "Open External Editor" → Make changes
+5. **Re-validate**: Repeat validation after changes
+
+### Terraform Operations Walkthrough
+
+#### 1. Project Initialization
+```bash
+# What happens when you select "Terraform Operations" → Init
+terraform init
+# Downloads providers, initializes backend, prepares workspace
+```
+
+#### 2. Planning Changes
+```bash
+# What happens when you select "Terraform Operations" → Plan  
+terraform plan
+# Shows what resources will be created, modified, or destroyed
+```
+
+#### 3. Applying Infrastructure
+```bash
+# What happens when you select "Terraform Operations" → Apply
+terraform apply -auto-approve
+# Creates/updates infrastructure based on your configuration
+```
+
+#### 4. Validation and Formatting
+```bash
+# Validation
+terraform validate
+# Checks syntax and configuration validity
+
+# Formatting  
+terraform fmt
+# Ensures consistent code formatting
+```
+
+### Template Structure Examples
+
+#### Linux VM Template Structure
+```
+terraform/templates/vm/linux-vm/
+├── main.tf           # VM, networking, security group
+├── variables.tf      # Customizable parameters
+├── outputs.tf        # IP addresses, SSH commands
+└── install.sh        # Post-deployment scripts
+```
+
+**Key Resources**:
+- Resource Group
+- Virtual Network and Subnet
+- Network Security Group (SSH + HTTP)
+- Public IP Address
+- Network Interface
+- Linux Virtual Machine
+- Custom Script Extension
+
+#### AKS Template Structure  
+```
+terraform/templates/aks/basic-aks/
+├── main.tf           # AKS cluster, node pools
+├── variables.tf      # Cluster configuration
+└── outputs.tf        # Kubeconfig, cluster info
+```
+
+**Key Resources**:
+- Resource Group
+- AKS Cluster with managed identity
+- Default node pool (configurable size)
+- Log Analytics workspace
+- Container Registry (optional)
+
+#### SQL Server Template Structure
+```
+terraform/templates/sql/sql-server/
+├── main.tf           # SQL Server, database, security
+├── variables.tf      # Server and DB configuration  
+└── outputs.tf        # Connection strings, endpoints
+```
+
+**Key Resources**:
+- Resource Group
+- SQL Server with managed identity
+- SQL Database with configurable tier
+- Key Vault for secrets
+- Firewall rules and virtual network rules
+
+### Integration Workflow Examples
+
+#### DevOps Pipeline Integration
+
+**Scenario**: Using Azure TUI in a CI/CD pipeline for infrastructure validation.
+
+1. **Pre-commit Hooks**:
+   - Use `Ctrl+T` → "Terraform Operations" → Validate before commits
+   - Format code with terraform fmt
+
+2. **Pull Request Reviews**:
+   - Analyze code structure with "Analyze Code"
+   - Validate syntax and configuration
+
+3. **Deployment Preparation**:
+   - Use "Browse Folders" to review all terraform projects
+   - Plan deployments with terraform plan
+
+#### Development Workflow
+
+**Scenario**: Daily development workflow for infrastructure changes.
+
+**Morning Routine**:
+1. Open Azure TUI: `./azure-tui`
+2. Check infrastructure status in main interface
+3. Review terraform projects: `Ctrl+T` → "Browse Folders"
+
+**Making Changes**:
+1. Open project in editor: `Ctrl+T` → "Open External Editor"
+2. Make infrastructure changes in VS Code/vim
+3. Return to Azure TUI
+4. Validate changes: `Ctrl+T` → "Terraform Operations" → Validate
+5. Plan deployment: Run terraform plan
+6. Apply if satisfied: Run terraform apply
+
+**Code Review**:
+1. Analyze modified projects: `Ctrl+T` → "Analyze Code"
+2. Check for best practices and missing files
+3. Format code: Run terraform fmt
+4. Final validation before commit
+
+### Keyboard Shortcuts Reference
+
+| Key | Action | Description |
+|-----|--------|-------------|
+| `Ctrl+T` | Open Terraform Manager | Main entry point for all Terraform operations |
+| `↑/↓` | Navigate Menu | Move between options in Terraform popup |
+| `Enter` | Select Option | Choose current menu item or folder |
+| `Esc` | Go Back/Close | Return to previous menu or close popup |
+
+### Tips and Best Practices
+
+1. **Project Organization**: Keep related terraform files in dedicated folders
+2. **Regular Validation**: Use `Ctrl+T` → "Terraform Operations" → Validate frequently
+3. **Code Formatting**: Always format code before commits using terraform fmt
+4. **Template Usage**: Start new projects from templates for best practices
+5. **Analysis First**: Run "Analyze Code" on new projects to ensure completeness
+
+### Error Handling
+
+**Common Issues and Solutions**:
+
+- **"No Terraform projects found"**: Ensure you have .tf files in your directories
+- **Validation errors**: Use "Analyze Code" to identify missing files or syntax issues  
+- **Editor not opening**: Terraform integration tries VS Code, then vim, nvim, nano in order
+- **Permission errors**: Ensure terraform binary is installed and in PATH
+
+### Integration with Azure Resources
+
+The Terraform integration works seamlessly with the main Azure TUI interface:
+
+1. **View Live Resources**: Use main interface to see current Azure resources
+2. **Plan Infrastructure**: Use Terraform integration to plan changes
+3. **Monitor Deployment**: Return to main interface to see deployment results
+4. **Troubleshoot Issues**: Use both views for comprehensive infrastructure management
+
+---
+
 ## Advanced Features
 
 ### Configuration Management
@@ -550,6 +799,7 @@ ai:
 | | `Shift+Tab` | Previous Tab | Switch to previous tab |
 | | `Ctrl+W` | Close Tab | Close current content tab |
 | **Actions** | `a` | AI Analysis | Get AI insights |
+| | `Ctrl+T` | Terraform Manager | Open Terraform integration |
 | | `M` | Metrics | Show performance dashboard |
 | | `E` | Edit | Resource configuration editor |
 | | `T` | Terraform | Generate Terraform code |
