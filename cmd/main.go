@@ -169,6 +169,19 @@ type storageActionMsg struct {
 	result resourceactions.ActionResult
 }
 
+// Subscription selection message types
+type currentSubscriptionMsg struct {
+	subscription *Subscription
+}
+type subscriptionMenuMsg struct {
+	subscriptions []Subscription
+}
+type subscriptionSelectedMsg struct {
+	subscription Subscription
+	success      bool
+	message      string
+}
+
 type model struct {
 	treeView               *tui.TreeView
 	statusBar              *tui.StatusBar
@@ -261,6 +274,13 @@ type model struct {
 	settingsEditKey       string
 	settingsEditValue     string
 	settingsCurrentConfig *config.AppConfig
+
+	// Subscription selection functionality
+	currentSubscription    *Subscription
+	showSubscriptionPopup  bool
+	subscriptionMenuIndex  int
+	availableSubscriptions []Subscription
+	subscriptionMenuMode   string // "menu" or "loading"
 }
 
 // Helper functions for search functionality
@@ -1508,11 +1528,20 @@ func initModel() model {
 		settingsEditKey:       "",
 		settingsEditValue:     "",
 		settingsCurrentConfig: nil,
+		// Initialize Subscription selection functionality
+		currentSubscription:    nil,
+		showSubscriptionPopup:  false,
+		subscriptionMenuIndex:  0,
+		availableSubscriptions: []Subscription{},
+		subscriptionMenuMode:   "menu",
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return loadDataCmd()
+	return tea.Batch(
+		loadDataCmd(),
+		getCurrentSubscriptionCmd(),
+	)
 }
 
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1734,6 +1763,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.logEntries = append(m.logEntries, "Settings Error: "+msg.message)
 		}
 
+	case currentSubscriptionMsg:
+		m.currentSubscription = msg.subscription
+
+	case subscriptionMenuMsg:
+		m.availableSubscriptions = msg.subscriptions
+		m.subscriptionMenuMode = "menu"
+
+	case subscriptionSelectedMsg:
+		m.actionInProgress = false
+		if msg.success {
+			m.currentSubscription = &msg.subscription
+			m.logEntries = append(m.logEntries, "Subscription: "+msg.message)
+			// Reload resource groups for the new subscription
+			return m, loadDataCmd()
+		} else {
+			m.logEntries = append(m.logEntries, "Subscription Error: "+msg.message)
+		}
+
 	case errorMsg:
 		m.loadingState = "error"
 
@@ -1825,6 +1872,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.settingsMenuIndex = (m.settingsMenuIndex - 1 + len(settingsMenuOptions)) % len(settingsMenuOptions)
 				} else if m.settingsMode == "folder-browser" {
 					m.settingsMenuIndex = (m.settingsMenuIndex - 1 + len(m.settingsFolders)) % len(m.settingsFolders)
+				}
+			}
+			return m, nil
+		}
+
+		// Handle Subscription popup navigation
+		if m.showSubscriptionPopup {
+			switch msg.String() {
+			case "escape":
+				m.showSubscriptionPopup = false
+			case "enter":
+				if m.subscriptionMenuMode == "menu" && len(m.availableSubscriptions) > 0 {
+					selectedSubscription := m.availableSubscriptions[m.subscriptionMenuIndex]
+					m.showSubscriptionPopup = false
+					return m, selectSubscriptionCmd(selectedSubscription.ID)
+				}
+			case "j", "down":
+				if m.subscriptionMenuMode == "menu" && len(m.availableSubscriptions) > 0 {
+					m.subscriptionMenuIndex = (m.subscriptionMenuIndex + 1) % len(m.availableSubscriptions)
+				}
+			case "k", "up":
+				if m.subscriptionMenuMode == "menu" && len(m.availableSubscriptions) > 0 {
+					m.subscriptionMenuIndex = (m.subscriptionMenuIndex - 1 + len(m.availableSubscriptions)) % len(m.availableSubscriptions)
 				}
 			}
 			return m, nil
@@ -1925,6 +1995,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, loadSettingsConfigCmd()
 			} else {
 				m.showSettingsPopup = false
+			}
+
+		// Subscription Selection Menu - Primary Access Key
+		case "ctrl+a":
+			if !m.showSubscriptionPopup {
+				m.showSubscriptionPopup = true
+				m.subscriptionMenuMode = "loading"
+				m.subscriptionMenuIndex = 0
+				return m, loadSubscriptionMenuCmd()
+			} else {
+				m.showSubscriptionPopup = false
 			}
 
 		case "left", "h":
@@ -2313,7 +2394,13 @@ func (m model) View() string {
 	// Status bar
 	if m.statusBar != nil {
 		m.statusBar.Segments = []tui.PowerlineSegment{}
-		m.statusBar.AddSegment("☁️ Azure Dashboard", colorBlue, bgDark)
+
+		// Show current subscription info instead of generic "Azure Dashboard"
+		if m.currentSubscription != nil {
+			m.statusBar.AddSegment(fmt.Sprintf("☁️ %s", m.currentSubscription.Name), colorBlue, bgDark)
+		} else {
+			m.statusBar.AddSegment("☁️ Azure Dashboard", colorBlue, bgDark)
+		}
 
 		switch m.loadingState {
 		case "loading":
@@ -2563,6 +2650,15 @@ func (m model) View() string {
 		allSections = append(allSections, renderShortcutRow("Ctrl+D", "Delete Secret"))
 		allSections = append(allSections, "")
 
+		// Subscription Management section
+		allSections = append(allSections, lipgloss.NewStyle().Bold(true).Foreground(colorAqua).Render("☁️ Subscription Management:"))
+		allSections = append(allSections, "")
+		allSections = append(allSections, renderShortcutRow("Ctrl+A", "Open Subscription Manager"))
+		allSections = append(allSections, renderShortcutRow("", "• Switch Azure subscriptions"))
+		allSections = append(allSections, renderShortcutRow("", "• View tenant information"))
+		allSections = append(allSections, renderShortcutRow("", "• Change active context"))
+		allSections = append(allSections, "")
+
 		// Interface section
 		allSections = append(allSections, lipgloss.NewStyle().Bold(true).Foreground(colorGray).Render("🎮 Interface:"))
 		allSections = append(allSections, "")
@@ -2608,6 +2704,11 @@ func (m model) View() string {
 	// Render Settings popup if active
 	if m.showSettingsPopup {
 		return m.renderSettingsPopup(fullView)
+	}
+
+	// Render Subscription popup if active
+	if m.showSubscriptionPopup {
+		return m.renderSubscriptionPopup(fullView)
 	}
 
 	return lipgloss.NewStyle().Background(bgDark).Render(fullView)
@@ -2868,6 +2969,103 @@ func (m model) renderSettingsPopup(background string) string {
 		Foreground(fgLight).
 		Padding(1, 2).
 		Width(60).
+		Align(lipgloss.Center, lipgloss.Top)
+
+	styledPopup := popupStyle.Render(content.String())
+
+	// Overlay on background
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, styledPopup)
+}
+
+func (m model) renderSubscriptionPopup(background string) string {
+	var content strings.Builder
+
+	// Title
+	title := lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render("☁️  Azure Subscription Manager")
+	content.WriteString(title)
+	content.WriteString("\n\n")
+
+	switch m.subscriptionMenuMode {
+	case "loading":
+		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorYellow).Render("Loading subscriptions..."))
+		content.WriteString("\n\n")
+		content.WriteString(lipgloss.NewStyle().Faint(true).Render("Please wait while we fetch your Azure subscriptions"))
+
+	case "menu":
+		// Show current subscription at the top
+		if m.currentSubscription != nil {
+			content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("Current Subscription:"))
+			content.WriteString("\n")
+			content.WriteString(lipgloss.NewStyle().Foreground(colorAqua).Render(fmt.Sprintf("🎯 %s", m.currentSubscription.Name)))
+			content.WriteString("\n")
+			content.WriteString(lipgloss.NewStyle().Faint(true).Render(fmt.Sprintf("   Tenant: %s", m.currentSubscription.TenantID)))
+			content.WriteString("\n\n")
+		}
+
+		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("Available Subscriptions:"))
+		content.WriteString("\n\n")
+
+		if len(m.availableSubscriptions) == 0 {
+			content.WriteString(lipgloss.NewStyle().Foreground(colorYellow).Render("No subscriptions found"))
+			content.WriteString("\n")
+			content.WriteString(lipgloss.NewStyle().Faint(true).Render("Check your Azure CLI login status"))
+		} else {
+			for i, subscription := range m.availableSubscriptions {
+				style := lipgloss.NewStyle().Foreground(fgMedium)
+				if i == m.subscriptionMenuIndex {
+					style = style.Foreground(fgLight).Bold(true)
+				}
+				prefix := "  "
+				if i == m.subscriptionMenuIndex {
+					prefix = "▶ "
+				}
+
+				// Highlight current subscription
+				icon := "📋"
+				if m.currentSubscription != nil && subscription.ID == m.currentSubscription.ID {
+					icon = "✅"
+					style = style.Foreground(colorGreen)
+				}
+
+				content.WriteString(style.Render(prefix + icon + " " + subscription.Name))
+				content.WriteString("\n")
+				if i == m.subscriptionMenuIndex {
+					content.WriteString(style.Render(fmt.Sprintf("   Tenant: %s", subscription.TenantID)))
+					content.WriteString("\n")
+					content.WriteString(style.Render(fmt.Sprintf("   ID: %s", subscription.ID)))
+					content.WriteString("\n")
+				}
+			}
+		}
+	}
+
+	content.WriteString("\n\n")
+
+	// Add status bar with contextual shortcuts
+	shortcuts := "Navigate: ↑/↓  Select: Enter  Back: Esc"
+	statusbarStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("4")).
+		Foreground(lipgloss.Color("15")).
+		Bold(true).
+		Padding(0, 1).
+		Width(58)
+
+	content.WriteString(statusbarStyle.Render("Subscriptions: " + shortcuts))
+	content.WriteString("\n")
+
+	// Footer text based on mode
+	switch m.subscriptionMenuMode {
+	case "loading":
+		content.WriteString(lipgloss.NewStyle().Italic(true).Foreground(colorGray).Render("Please wait..."))
+	case "menu":
+		content.WriteString(lipgloss.NewStyle().Italic(true).Foreground(colorGray).Render("Select a subscription to switch context"))
+	}
+
+	// Create popup style - clean, no borders or backgrounds
+	popupStyle := lipgloss.NewStyle().
+		Foreground(fgLight).
+		Padding(1, 2).
+		Width(70).
 		Align(lipgloss.Center, lipgloss.Top)
 
 	styledPopup := popupStyle.Render(content.String())
@@ -4383,6 +4581,95 @@ func saveSettingsConfigCmd(cfg *config.AppConfig) tea.Cmd {
 		return settingsConfigSavedMsg{
 			success: true,
 			message: "Configuration saved successfully",
+		}
+	}
+}
+
+func getCurrentSubscription() (*Subscription, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "az", "account", "show", "--output", "json")
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get current subscription: %v", err)
+	}
+
+	var azSub struct {
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		TenantID  string `json:"tenantId"`
+		IsDefault bool   `json:"isDefault"`
+	}
+
+	if err := json.Unmarshal(output, &azSub); err != nil {
+		return nil, fmt.Errorf("failed to parse current subscription data: %v", err)
+	}
+
+	return &Subscription{
+		ID:        azSub.ID,
+		Name:      azSub.Name,
+		TenantID:  azSub.TenantID,
+		IsDefault: azSub.IsDefault,
+	}, nil
+}
+
+func setCurrentSubscription(subscriptionID string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, "az", "account", "set", "--subscription", subscriptionID)
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("failed to set current subscription: %v", err)
+	}
+
+	return nil
+}
+
+func getCurrentSubscriptionCmd() tea.Cmd {
+	return func() tea.Msg {
+		sub, err := getCurrentSubscription()
+		if err != nil {
+			return errorMsg{error: err.Error()}
+		}
+		return currentSubscriptionMsg{subscription: sub}
+	}
+}
+
+func loadSubscriptionMenuCmd() tea.Cmd {
+	return func() tea.Msg {
+		subs, err := fetchSubscriptions()
+		if err != nil {
+			return errorMsg{error: err.Error()}
+		}
+		return subscriptionMenuMsg{subscriptions: subs}
+	}
+}
+
+func selectSubscriptionCmd(subscriptionID string) tea.Cmd {
+	return func() tea.Msg {
+		err := setCurrentSubscription(subscriptionID)
+		if err != nil {
+			return subscriptionSelectedMsg{
+				success: false,
+				message: fmt.Sprintf("Failed to switch subscription: %v", err),
+			}
+		}
+
+		// Get the updated current subscription
+		sub, err := getCurrentSubscription()
+		if err != nil {
+			return subscriptionSelectedMsg{
+				success: false,
+				message: fmt.Sprintf("Subscription changed but failed to get updated info: %v", err),
+			}
+		}
+
+		return subscriptionSelectedMsg{
+			subscription: *sub,
+			success:      true,
+			message:      fmt.Sprintf("Successfully switched to subscription: %s", sub.Name),
 		}
 	}
 }
