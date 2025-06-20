@@ -204,6 +204,30 @@ type Firewall struct {
 	ResourceGroup string `json:"resourceGroup"`
 }
 
+// Network Loading Progress Types for UI feedback
+type NetworkLoadingProgress struct {
+	CurrentOperation       string                      `json:"currentOperation"`
+	TotalOperations        int                         `json:"totalOperations"`
+	CompletedOperations    int                         `json:"completedOperations"`
+	ProgressPercentage     float64                     `json:"progressPercentage"`
+	ResourceProgress       map[string]ResourceProgress `json:"resourceProgress"`
+	Errors                 []string                    `json:"errors"`
+	StartTime              time.Time                   `json:"startTime"`
+	EstimatedTimeRemaining string                      `json:"estimatedTimeRemaining"`
+}
+
+type ResourceProgress struct {
+	ResourceType string    `json:"resourceType"`
+	Status       string    `json:"status"` // "pending", "loading", "completed", "failed"
+	StartTime    time.Time `json:"startTime"`
+	EndTime      time.Time `json:"endTime"`
+	Error        string    `json:"error"`
+	Count        int       `json:"count"`
+}
+
+// ProgressCallback function type for network loading progress updates
+type ProgressCallback func(progress NetworkLoadingProgress)
+
 // Network Dashboard represents a comprehensive network overview
 type NetworkDashboard struct {
 	VirtualNetworks       []VirtualNetwork       `json:"virtualNetworks"`
@@ -329,6 +353,200 @@ func GetNetworkDashboard(resourceGroup string) (*NetworkDashboard, error) {
 	// If we have errors, include them in the dashboard
 	if len(errors) > 0 {
 		dashboard.Errors = errors
+		return dashboard, fmt.Errorf("some network resources failed to load: %s", strings.Join(errors, "; "))
+	}
+
+	return dashboard, nil
+}
+
+// GetNetworkDashboardWithProgress retrieves comprehensive network information with progress callback
+func GetNetworkDashboardWithProgress(resourceGroup string, progressCallback ProgressCallback) (*NetworkDashboard, error) {
+	dashboard := &NetworkDashboard{}
+	var errors []string
+
+	// Initialize progress tracking
+	resourceTypes := []string{"VirtualNetworks", "NetworkSecurityGroups", "RouteTables", "PublicIPs", "NetworkInterfaces", "LoadBalancers", "Firewalls"}
+	totalOperations := len(resourceTypes)
+
+	progress := NetworkLoadingProgress{
+		CurrentOperation:       "Initializing network resource loading...",
+		TotalOperations:        totalOperations,
+		CompletedOperations:    0,
+		ProgressPercentage:     0.0,
+		ResourceProgress:       make(map[string]ResourceProgress),
+		Errors:                 []string{},
+		StartTime:              time.Now(),
+		EstimatedTimeRemaining: "Calculating...",
+	}
+
+	// Initialize resource progress tracking
+	for _, resType := range resourceTypes {
+		progress.ResourceProgress[resType] = ResourceProgress{
+			ResourceType: resType,
+			Status:       "pending",
+			StartTime:    time.Time{},
+			EndTime:      time.Time{},
+			Error:        "",
+			Count:        0,
+		}
+	}
+
+	// Send initial progress
+	if progressCallback != nil {
+		progressCallback(progress)
+	}
+
+	// Helper function to update progress
+	updateProgress := func(operation string, resType string, status string, count int, err error) {
+		progress.CurrentOperation = operation
+
+		resourceProgress := progress.ResourceProgress[resType]
+		resourceProgress.Status = status
+
+		if status == "loading" {
+			resourceProgress.StartTime = time.Now()
+		} else if status == "completed" || status == "failed" {
+			resourceProgress.EndTime = time.Now()
+			resourceProgress.Count = count
+			if status == "completed" {
+				progress.CompletedOperations++
+			}
+		}
+
+		if err != nil {
+			resourceProgress.Error = err.Error()
+			resourceProgress.Status = "failed"
+			errors = append(errors, fmt.Sprintf("%s: %v", resType, err))
+			progress.Errors = errors
+		}
+
+		progress.ResourceProgress[resType] = resourceProgress
+		progress.ProgressPercentage = float64(progress.CompletedOperations) / float64(progress.TotalOperations) * 100
+
+		// Calculate estimated time remaining
+		if progress.CompletedOperations > 0 {
+			elapsed := time.Since(progress.StartTime)
+			avgTimePerOperation := elapsed / time.Duration(progress.CompletedOperations)
+			remaining := avgTimePerOperation * time.Duration(progress.TotalOperations-progress.CompletedOperations)
+			progress.EstimatedTimeRemaining = fmt.Sprintf("%.1fs remaining", remaining.Seconds())
+		}
+
+		if progressCallback != nil {
+			progressCallback(progress)
+		}
+	}
+
+	// Load Virtual Networks
+	updateProgress("Loading Virtual Networks...", "VirtualNetworks", "loading", 0, nil)
+	vnets, err := ListVirtualNetworks()
+	if err != nil {
+		updateProgress("Virtual Networks failed", "VirtualNetworks", "failed", 0, err)
+		dashboard.VirtualNetworks = []VirtualNetwork{}
+	} else {
+		updateProgress("Virtual Networks loaded", "VirtualNetworks", "completed", len(vnets), nil)
+		dashboard.VirtualNetworks = vnets
+	}
+
+	// Load Network Security Groups
+	updateProgress("Loading Network Security Groups...", "NetworkSecurityGroups", "loading", 0, nil)
+	nsgs, err := ListNetworkSecurityGroups()
+	if err != nil {
+		updateProgress("Network Security Groups failed", "NetworkSecurityGroups", "failed", 0, err)
+		dashboard.NetworkSecurityGroups = []NetworkSecurityGroup{}
+	} else {
+		updateProgress("Network Security Groups loaded", "NetworkSecurityGroups", "completed", len(nsgs), nil)
+		dashboard.NetworkSecurityGroups = nsgs
+	}
+
+	// Load Route Tables
+	updateProgress("Loading Route Tables...", "RouteTables", "loading", 0, nil)
+	routeTables, err := ListRouteTables()
+	if err != nil {
+		updateProgress("Route Tables failed", "RouteTables", "failed", 0, err)
+		dashboard.RouteTables = []RouteTable{}
+	} else {
+		updateProgress("Route Tables loaded", "RouteTables", "completed", len(routeTables), nil)
+		dashboard.RouteTables = routeTables
+	}
+
+	// Load Public IPs
+	updateProgress("Loading Public IPs...", "PublicIPs", "loading", 0, nil)
+	publicIPs, err := ListPublicIPs()
+	if err != nil {
+		updateProgress("Public IPs failed", "PublicIPs", "failed", 0, err)
+		dashboard.PublicIPs = []PublicIP{}
+	} else {
+		updateProgress("Public IPs loaded", "PublicIPs", "completed", len(publicIPs), nil)
+		dashboard.PublicIPs = publicIPs
+	}
+
+	// Load Network Interfaces
+	updateProgress("Loading Network Interfaces...", "NetworkInterfaces", "loading", 0, nil)
+	nics, err := ListNetworkInterfaces()
+	if err != nil {
+		updateProgress("Network Interfaces failed", "NetworkInterfaces", "failed", 0, err)
+		dashboard.NetworkInterfaces = []NetworkInterface{}
+	} else {
+		updateProgress("Network Interfaces loaded", "NetworkInterfaces", "completed", len(nics), nil)
+		dashboard.NetworkInterfaces = nics
+	}
+
+	// Load Load Balancers
+	updateProgress("Loading Load Balancers...", "LoadBalancers", "loading", 0, nil)
+	lbs, err := ListLoadBalancers()
+	if err != nil {
+		updateProgress("Load Balancers failed", "LoadBalancers", "failed", 0, err)
+		dashboard.LoadBalancers = []LoadBalancer{}
+	} else {
+		updateProgress("Load Balancers loaded", "LoadBalancers", "completed", len(lbs), nil)
+		dashboard.LoadBalancers = lbs
+	}
+
+	// Load Firewalls
+	updateProgress("Loading Azure Firewalls...", "Firewalls", "loading", 0, nil)
+	firewalls, err := ListFirewalls()
+	if err != nil {
+		updateProgress("Azure Firewalls failed", "Firewalls", "failed", 0, err)
+		dashboard.Firewalls = []Firewall{}
+	} else {
+		updateProgress("Azure Firewalls loaded", "Firewalls", "completed", len(firewalls), nil)
+		dashboard.Firewalls = firewalls
+	}
+
+	// Calculate summary and topology
+	progress.CurrentOperation = "Calculating network summary and topology..."
+	if progressCallback != nil {
+		progressCallback(progress)
+	}
+
+	dashboard.Summary = calculateNetworkSummary(dashboard)
+	dashboard.Topology = getNetworkTopology(dashboard)
+
+	// Final progress update
+	progress.CurrentOperation = "Network dashboard loading completed"
+	progress.ProgressPercentage = 100.0
+	totalResources := len(dashboard.VirtualNetworks) + len(dashboard.NetworkSecurityGroups) +
+		len(dashboard.RouteTables) + len(dashboard.PublicIPs) +
+		len(dashboard.NetworkInterfaces) + len(dashboard.LoadBalancers) + len(dashboard.Firewalls)
+
+	if len(errors) > 0 {
+		progress.CurrentOperation = fmt.Sprintf("Completed with %d errors - %d resources loaded", len(errors), totalResources)
+		dashboard.Errors = errors
+	} else {
+		progress.CurrentOperation = fmt.Sprintf("Successfully loaded %d network resources", totalResources)
+	}
+
+	if progressCallback != nil {
+		progressCallback(progress)
+	}
+
+	// Return error only if all operations failed
+	if len(errors) == totalOperations {
+		return dashboard, fmt.Errorf("all network resource operations failed: %s", strings.Join(errors, "; "))
+	}
+
+	// Return partial success if some operations failed
+	if len(errors) > 0 {
 		return dashboard, fmt.Errorf("some network resources failed to load: %s", strings.Join(errors, "; "))
 	}
 
@@ -894,123 +1112,572 @@ func RenderNetworkDashboard() string {
 		})
 	}
 
-	// Build comprehensive network matrix
-	rows := [][]string{}
+	// Use the enhanced network dashboard renderer
+	return renderEnhancedNetworkDashboard(dashboard)
+}
 
-	// Header row
-	rows = append(rows, []string{"Resource Type", "Name", "Location", "Resource Group", "Status", "Associated Resources"})
+// renderEnhancedNetworkDashboard renders the network dashboard with improved formatting and styling
+func renderEnhancedNetworkDashboard(dashboard *NetworkDashboard) string {
+	var content strings.Builder
 
-	// Virtual Networks with subnet details
-	for _, vnet := range dashboard.VirtualNetworks {
-		associatedResources := fmt.Sprintf("%d subnets", len(vnet.Subnets))
-		if len(vnet.DnsServers) > 0 {
-			associatedResources += fmt.Sprintf(", %d DNS servers", len(vnet.DnsServers))
-		}
-		rows = append(rows, []string{"🌐 VNet", vnet.Name, vnet.Location, vnet.ResourceGroup, "Active", associatedResources})
+	// Enhanced dashboard header with summary statistics
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Padding(0, 1)
+	content.WriteString(headerStyle.Render("🌐 Azure Network Infrastructure Dashboard"))
+	content.WriteString("\n\n")
 
-		// Add subnet details
-		for _, subnet := range vnet.Subnets {
-			subnetDetails := subnet.AddressPrefix
-			if subnet.NSGName != "" {
-				subnetDetails += fmt.Sprintf(" (NSG: %s)", subnet.NSGName)
+	// Network summary section with color-coded metrics
+	summaryStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("10"))
+	content.WriteString(summaryStyle.Render("📊 Network Summary"))
+	content.WriteString("\n")
+
+	metricStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+	content.WriteString(fmt.Sprintf("Virtual Networks: %s  •  Security Groups: %s  •  Subnets: %s\n",
+		metricStyle.Render(fmt.Sprintf("%d", dashboard.Summary.TotalVNets)),
+		metricStyle.Render(fmt.Sprintf("%d", dashboard.Summary.TotalNSGs)),
+		metricStyle.Render(fmt.Sprintf("%d", dashboard.Summary.TotalSubnets))))
+
+	content.WriteString(fmt.Sprintf("Public IPs: %s  •  Private IPs: %s  •  Load Balancers: %s\n",
+		metricStyle.Render(fmt.Sprintf("%d", dashboard.Summary.TotalPublicIPs)),
+		metricStyle.Render(fmt.Sprintf("%d", dashboard.Summary.TotalPrivateIPs)),
+		metricStyle.Render(fmt.Sprintf("%d", len(dashboard.LoadBalancers)))))
+	content.WriteString("\n")
+
+	// Virtual Networks section with hierarchical display
+	if len(dashboard.VirtualNetworks) > 0 {
+		sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+		content.WriteString(sectionStyle.Render("🌐 Virtual Networks"))
+		content.WriteString("\n")
+		content.WriteString(strings.Repeat("─", 80) + "\n")
+
+		for _, vnet := range dashboard.VirtualNetworks {
+			// VNet header with location and resource group
+			vnetStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
+			locationStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+			content.WriteString(fmt.Sprintf("%s %s %s\n",
+				vnetStyle.Render(vnet.Name),
+				locationStyle.Render(fmt.Sprintf("(%s)", vnet.Location)),
+				locationStyle.Render(fmt.Sprintf("[%s]", vnet.ResourceGroup))))
+
+			// Address space
+			if len(vnet.AddressSpace.AddressPrefixes) > 0 {
+				addrStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+				content.WriteString(fmt.Sprintf("  📍 Address Space: %s\n",
+					addrStyle.Render(strings.Join(vnet.AddressSpace.AddressPrefixes, ", "))))
 			}
-			if subnet.RouteTableName != "" {
-				subnetDetails += fmt.Sprintf(" (RT: %s)", subnet.RouteTableName)
+
+			// DNS servers
+			if len(vnet.DnsServers) > 0 {
+				dnsStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("13"))
+				content.WriteString(fmt.Sprintf("  🌐 DNS Servers: %s\n",
+					dnsStyle.Render(strings.Join(vnet.DnsServers, ", "))))
 			}
-			rows = append(rows, []string{"  ┗━ 🏠 Subnet", subnet.Name, "-", "-", "Active", subnetDetails})
-		}
-	}
 
-	// Network Security Groups with rule count
-	for _, nsg := range dashboard.NetworkSecurityGroups {
-		ruleCount := fmt.Sprintf("%d rules", len(nsg.SecurityRules))
-		associatedCount := fmt.Sprintf("%d subnets, %d NICs", len(nsg.Subnets), len(nsg.NetworkInterfaces))
-		rows = append(rows, []string{"🔒 NSG", nsg.Name, nsg.Location, nsg.ResourceGroup, "Active", ruleCount + ", " + associatedCount})
-	}
+			// Subnets with enhanced details
+			if len(vnet.Subnets) > 0 {
+				content.WriteString("  🏠 Subnets:\n")
+				for _, subnet := range vnet.Subnets {
+					subnetStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("7"))
+					protectionStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 
-	// Route Tables
-	for _, rt := range dashboard.RouteTables {
-		routeCount := fmt.Sprintf("%d routes", len(rt.Routes))
-		subnetCount := fmt.Sprintf("%d subnets", len(rt.Subnets))
-		rows = append(rows, []string{"🗺️ Route Table", rt.Name, rt.Location, rt.ResourceGroup, "Active", routeCount + ", " + subnetCount})
-	}
-
-	// Public IPs
-	for _, pip := range dashboard.PublicIPs {
-		details := pip.AllocationMethod
-		if pip.IPAddress != "" {
-			details += fmt.Sprintf(" (%s)", pip.IPAddress)
-		}
-		if pip.AssociatedResource != "" {
-			details += fmt.Sprintf(" → %s", pip.AssociatedResource)
-		}
-		rows = append(rows, []string{"🌍 Public IP", pip.Name, pip.Location, pip.ResourceGroup, "Active", details})
-	}
-
-	// Network Interfaces
-	for _, nic := range dashboard.NetworkInterfaces {
-		details := ""
-
-		// Extract IP addresses from primary IP configuration
-		for _, ipConfig := range nic.IPConfigurations {
-			if ipConfig.Primary {
-				details = ipConfig.PrivateIPAddress
-				if ipConfig.PublicIPAddress != nil {
-					// Extract public IP name from the ID
-					publicIPName := ""
-					if parts := strings.Split(ipConfig.PublicIPAddress.ID, "/"); len(parts) > 0 {
-						publicIPName = parts[len(parts)-1]
+					protectionInfo := ""
+					if subnet.NSGName != "" {
+						protectionInfo += fmt.Sprintf(" 🔒 %s", subnet.NSGName)
 					}
-					details += fmt.Sprintf(" / %s", publicIPName)
+					if subnet.RouteTableName != "" {
+						protectionInfo += fmt.Sprintf(" 🗺️ %s", subnet.RouteTableName)
+					}
+
+					content.WriteString(fmt.Sprintf("    ┣━ %s %s%s\n",
+						subnetStyle.Render(subnet.Name),
+						subnetStyle.Render(fmt.Sprintf("(%s)", subnet.AddressPrefix)),
+						protectionStyle.Render(protectionInfo)))
 				}
+			}
+			content.WriteString("\n")
+		}
+	}
+
+	// Network Security Groups section
+	if len(dashboard.NetworkSecurityGroups) > 0 {
+		sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
+		content.WriteString(sectionStyle.Render("🔒 Network Security Groups"))
+		content.WriteString("\n")
+		content.WriteString(strings.Repeat("─", 80) + "\n")
+
+		for _, nsg := range dashboard.NetworkSecurityGroups {
+			nsgStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("11"))
+			locationStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+			content.WriteString(fmt.Sprintf("%s %s %s\n",
+				nsgStyle.Render(nsg.Name),
+				locationStyle.Render(fmt.Sprintf("(%s)", nsg.Location)),
+				locationStyle.Render(fmt.Sprintf("[%s]", nsg.ResourceGroup))))
+
+			// Rule count with color coding
+			ruleCountStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+			if len(nsg.SecurityRules) > 20 {
+				ruleCountStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+			} else if len(nsg.SecurityRules) > 10 {
+				ruleCountStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+			}
+			content.WriteString(fmt.Sprintf("  📜 Security Rules: %s\n",
+				ruleCountStyle.Render(fmt.Sprintf("%d", len(nsg.SecurityRules)))))
+
+			// Associated resources
+			if len(nsg.Subnets) > 0 || len(nsg.NetworkInterfaces) > 0 {
+				assocStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+				content.WriteString(fmt.Sprintf("  🔗 Protecting: %s subnets, %s NICs\n",
+					assocStyle.Render(fmt.Sprintf("%d", len(nsg.Subnets))),
+					assocStyle.Render(fmt.Sprintf("%d", len(nsg.NetworkInterfaces)))))
+			}
+			content.WriteString("\n")
+		}
+	}
+
+	// Connectivity section (Public IPs, Load Balancers, etc.)
+	if len(dashboard.PublicIPs) > 0 || len(dashboard.LoadBalancers) > 0 || len(dashboard.Firewalls) > 0 {
+		sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("13"))
+		content.WriteString(sectionStyle.Render("🌍 Connectivity & Security"))
+		content.WriteString("\n")
+		content.WriteString(strings.Repeat("─", 80) + "\n")
+
+		// Public IPs
+		if len(dashboard.PublicIPs) > 0 {
+			subSectionStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+			content.WriteString(subSectionStyle.Render("Public IP Addresses:"))
+			content.WriteString("\n")
+
+			for _, pip := range dashboard.PublicIPs {
+				ipStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+				statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+				if pip.AllocationMethod == "Dynamic" {
+					statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+				}
+
+				ipDisplay := pip.IPAddress
+				if ipDisplay == "" {
+					ipDisplay = "Not Assigned"
+					statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+				}
+
+				content.WriteString(fmt.Sprintf("  %s %s %s",
+					ipStyle.Render(pip.Name),
+					statusStyle.Render(fmt.Sprintf("(%s)", pip.AllocationMethod)),
+					statusStyle.Render(ipDisplay)))
+
+				if pip.AssociatedResource != "" {
+					assocStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("6"))
+					content.WriteString(fmt.Sprintf(" → %s", assocStyle.Render(pip.AssociatedResource)))
+				}
+				content.WriteString("\n")
+			}
+			content.WriteString("\n")
+		}
+
+		// Load Balancers
+		if len(dashboard.LoadBalancers) > 0 {
+			subSectionStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+			content.WriteString(subSectionStyle.Render("Load Balancers:"))
+			content.WriteString("\n")
+
+			for _, lb := range dashboard.LoadBalancers {
+				lbStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("11"))
+				skuStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
+
+				content.WriteString(fmt.Sprintf("  %s %s (%d frontends, %d backends)\n",
+					lbStyle.Render(lb.Name),
+					skuStyle.Render(fmt.Sprintf("[%s]", lb.SKU.Name)),
+					len(lb.FrontendIPs),
+					len(lb.BackendPools)))
+			}
+			content.WriteString("\n")
+		}
+
+		// Azure Firewalls
+		if len(dashboard.Firewalls) > 0 {
+			subSectionStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("12"))
+			content.WriteString(subSectionStyle.Render("Azure Firewalls:"))
+			content.WriteString("\n")
+
+			for _, fw := range dashboard.Firewalls {
+				fwStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+				locationStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+
+				content.WriteString(fmt.Sprintf("  %s %s\n",
+					fwStyle.Render(fw.Name),
+					locationStyle.Render(fmt.Sprintf("(%s)", fw.Location))))
+			}
+			content.WriteString("\n")
+		}
+	}
+
+	// Network topology quick view
+	if len(dashboard.Topology.PeeringStatus) > 0 || len(dashboard.Topology.GatewayStatus) > 0 {
+		sectionStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("5"))
+		content.WriteString(sectionStyle.Render("🗺️ Network Topology"))
+		content.WriteString("\n")
+		content.WriteString(strings.Repeat("─", 80) + "\n")
+
+		// VNet Peerings
+		if len(dashboard.Topology.PeeringStatus) > 0 {
+			peeringStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+			content.WriteString(peeringStyle.Render("VNet Peerings:"))
+			content.WriteString("\n")
+
+			for _, peering := range dashboard.Topology.PeeringStatus {
+				statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+				if peering.PeeringState != "Connected" {
+					statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+				}
+
+				content.WriteString(fmt.Sprintf("  %s ↔ %s %s\n",
+					peering.VNetName,
+					peering.PeerVNetName,
+					statusStyle.Render(fmt.Sprintf("[%s]", peering.PeeringState))))
+			}
+			content.WriteString("\n")
+		}
+
+		// Gateway connections
+		if len(dashboard.Topology.GatewayStatus) > 0 {
+			gatewayStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("6"))
+			content.WriteString(gatewayStyle.Render("Gateway Connections:"))
+			content.WriteString("\n")
+
+			for _, gateway := range dashboard.Topology.GatewayStatus {
+				statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+				if gateway.Status != "Connected" {
+					statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+				}
+
+				content.WriteString(fmt.Sprintf("  %s %s %s %s\n",
+					gateway.VNetName,
+					gateway.Type,
+					gateway.Name,
+					statusStyle.Render(fmt.Sprintf("[%s]", gateway.Status))))
+			}
+			content.WriteString("\n")
+		}
+	}
+
+	// Error reporting section
+	if len(dashboard.Errors) > 0 {
+		errorStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("9"))
+		content.WriteString(errorStyle.Render("⚠️ Issues Detected"))
+		content.WriteString("\n")
+		content.WriteString(strings.Repeat("─", 80) + "\n")
+
+		for i, err := range dashboard.Errors {
+			if i >= 5 { // Limit error display
+				content.WriteString(fmt.Sprintf("  ... and %d more errors\n", len(dashboard.Errors)-5))
 				break
 			}
+			errorMsgStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+			content.WriteString(fmt.Sprintf("  • %s\n", errorMsgStyle.Render(err)))
 		}
-
-		// If no primary IP config, use the first one
-		if details == "" && len(nic.IPConfigurations) > 0 {
-			ipConfig := nic.IPConfigurations[0]
-			details = ipConfig.PrivateIPAddress
-			if ipConfig.PublicIPAddress != nil {
-				// Extract public IP name from the ID
-				publicIPName := ""
-				if parts := strings.Split(ipConfig.PublicIPAddress.ID, "/"); len(parts) > 0 {
-					publicIPName = parts[len(parts)-1]
-				}
-				details += fmt.Sprintf(" / %s", publicIPName)
-			}
-		}
-
-		if nic.VirtualMachine != nil {
-			// Extract VM name from the ID
-			vmName := ""
-			if parts := strings.Split(nic.VirtualMachine.ID, "/"); len(parts) > 0 {
-				vmName = parts[len(parts)-1]
-			}
-			details += fmt.Sprintf(" → %s", vmName)
-		}
-		rows = append(rows, []string{"🔗 Network Interface", nic.Name, nic.Location, nic.ResourceGroup, "Active", details})
+		content.WriteString("\n")
 	}
 
-	// Load Balancers
-	for _, lb := range dashboard.LoadBalancers {
-		details := fmt.Sprintf("%s (%d frontends, %d backends)", lb.SKU.Name, len(lb.FrontendIPs), len(lb.BackendPools))
-		rows = append(rows, []string{"⚖️ Load Balancer", lb.Name, lb.Location, lb.ResourceGroup, "Active", details})
+	// Footer with helpful information
+	footerStyle := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("8"))
+	content.WriteString(footerStyle.Render("💡 Use 'V' for VNet details, 'G' for NSG rules, 'Z' for topology view, 'A' for AI analysis"))
+
+	return content.String()
+}
+
+// RenderNetworkLoadingProgress renders a progress bar for network dashboard loading
+func RenderNetworkLoadingProgress(progress NetworkLoadingProgress) string {
+	var content strings.Builder
+
+	// Header
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Padding(0, 1)
+	content.WriteString(headerStyle.Render("🌐 Loading Network Dashboard"))
+	content.WriteString("\n\n")
+
+	// Current operation
+	operationStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
+	content.WriteString(operationStyle.Render(fmt.Sprintf("📋 %s", progress.CurrentOperation)))
+	content.WriteString("\n\n")
+
+	// Overall progress bar
+	progressBarWidth := 50
+	filledWidth := int(float64(progressBarWidth) * progress.ProgressPercentage / 100.0)
+	emptyWidth := progressBarWidth - filledWidth
+
+	progressBar := strings.Repeat("█", filledWidth) + strings.Repeat("░", emptyWidth)
+	progressStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+
+	content.WriteString(fmt.Sprintf("Progress: [%s] %.1f%% (%d/%d)",
+		progressStyle.Render(progressBar),
+		progress.ProgressPercentage,
+		progress.CompletedOperations,
+		progress.TotalOperations))
+	content.WriteString("\n\n")
+
+	// Time information
+	elapsed := time.Since(progress.StartTime)
+	timeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	content.WriteString(timeStyle.Render(fmt.Sprintf("⏱️  Elapsed: %.1fs | %s", elapsed.Seconds(), progress.EstimatedTimeRemaining)))
+	content.WriteString("\n\n")
+
+	// Detailed resource progress
+	content.WriteString("📊 Resource Loading Status:\n")
+	content.WriteString(strings.Repeat("─", 70) + "\n")
+
+	// Sort resource types for consistent display
+	resourceTypes := []string{"VirtualNetworks", "NetworkSecurityGroups", "RouteTables", "PublicIPs", "NetworkInterfaces", "LoadBalancers", "Firewalls"}
+
+	for _, resType := range resourceTypes {
+		if resProgress, exists := progress.ResourceProgress[resType]; exists {
+			var statusIcon, statusColor string
+
+			switch resProgress.Status {
+			case "pending":
+				statusIcon = "⏳"
+				statusColor = "8" // Gray
+			case "loading":
+				statusIcon = "🔄"
+				statusColor = "11" // Yellow
+			case "completed":
+				statusIcon = "✅"
+				statusColor = "10" // Green
+			case "failed":
+				statusIcon = "❌"
+				statusColor = "9" // Red
+			default:
+				statusIcon = "❔"
+				statusColor = "8"
+			}
+
+			statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(statusColor))
+			resourceName := formatResourceTypeName(resType)
+
+			line := fmt.Sprintf("%s %s", statusIcon, resourceName)
+
+			// Add count information if completed
+			if resProgress.Status == "completed" && resProgress.Count > 0 {
+				line += fmt.Sprintf(" (%d items)", resProgress.Count)
+			}
+
+			// Add error information if failed
+			if resProgress.Status == "failed" && resProgress.Error != "" {
+				line += fmt.Sprintf(" - %s", truncateString(resProgress.Error, 40))
+			}
+
+			content.WriteString(statusStyle.Render(line))
+			content.WriteString("\n")
+		}
 	}
 
-	// Firewalls
-	for _, fw := range dashboard.Firewalls {
-		rows = append(rows, []string{"🔥 Firewall", fw.Name, fw.Location, fw.ResourceGroup, "Active", "Azure Firewall"})
+	// Error summary if there are errors
+	if len(progress.Errors) > 0 {
+		content.WriteString("\n")
+		errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+		content.WriteString(errorStyle.Render("⚠️  Errors encountered:"))
+		content.WriteString("\n")
+
+		for i, err := range progress.Errors {
+			if i >= 3 { // Limit to first 3 errors
+				content.WriteString(fmt.Sprintf("   ... and %d more errors\n", len(progress.Errors)-3))
+				break
+			}
+			content.WriteString(fmt.Sprintf("   • %s\n", truncateString(err, 60)))
+		}
+	}
+
+	// Footer with helpful information
+	content.WriteString("\n")
+	helpStyle := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("8"))
+	content.WriteString(helpStyle.Render("💡 This may take a few moments depending on your Azure subscription size"))
+
+	return content.String()
+}
+
+// RenderNetworkTopologyLoadingProgress renders a progress bar for network topology loading
+func RenderNetworkTopologyLoadingProgress(progress NetworkLoadingProgress) string {
+	var content strings.Builder
+
+	// Header - customized for topology
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Padding(0, 1)
+	content.WriteString(headerStyle.Render("🗺️ Loading Network Topology"))
+	content.WriteString("\n\n")
+
+	// Current operation
+	operationStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
+	content.WriteString(operationStyle.Render(fmt.Sprintf("📋 %s", progress.CurrentOperation)))
+	content.WriteString("\n\n")
+
+	// Overall progress bar
+	progressBarWidth := 50
+	filledWidth := int(float64(progressBarWidth) * progress.ProgressPercentage / 100.0)
+	emptyWidth := progressBarWidth - filledWidth
+
+	progressBar := strings.Repeat("█", filledWidth) + strings.Repeat("░", emptyWidth)
+	progressStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+
+	content.WriteString(fmt.Sprintf("Progress: [%s] %.1f%% (%d/%d)",
+		progressStyle.Render(progressBar),
+		progress.ProgressPercentage,
+		progress.CompletedOperations,
+		progress.TotalOperations))
+	content.WriteString("\n\n")
+
+	// Time information
+	elapsed := time.Since(progress.StartTime)
+	timeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	content.WriteString(timeStyle.Render(fmt.Sprintf("⏱️  Elapsed: %.1fs | %s", elapsed.Seconds(), progress.EstimatedTimeRemaining)))
+	content.WriteString("\n\n")
+
+	// Detailed resource progress
+	content.WriteString("🗺️  Topology Data Loading Status:\n")
+	content.WriteString(strings.Repeat("─", 70) + "\n")
+
+	// Sort resource types for consistent display
+	resourceTypes := []string{"VirtualNetworks", "NetworkSecurityGroups", "RouteTables", "PublicIPs", "NetworkInterfaces", "LoadBalancers", "Firewalls"}
+
+	for _, resType := range resourceTypes {
+		if resProgress, exists := progress.ResourceProgress[resType]; exists {
+			var statusIcon, statusColor string
+
+			switch resProgress.Status {
+			case "pending":
+				statusIcon = "⏳"
+				statusColor = "8" // Gray
+			case "loading":
+				statusIcon = "🔄"
+				statusColor = "11" // Yellow
+			case "completed":
+				statusIcon = "✅"
+				statusColor = "10" // Green
+			case "failed":
+				statusIcon = "❌"
+				statusColor = "9" // Red
+			default:
+				statusIcon = "❔"
+				statusColor = "8"
+			}
+
+			statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(statusColor))
+			resourceName := formatResourceTypeName(resType)
+
+			line := fmt.Sprintf("%s %s", statusIcon, resourceName)
+
+			// Add count information if completed
+			if resProgress.Status == "completed" && resProgress.Count > 0 {
+				line += fmt.Sprintf(" (%d items)", resProgress.Count)
+			}
+
+			// Add error information if failed
+			if resProgress.Status == "failed" && resProgress.Error != "" {
+				line += fmt.Sprintf(" - %s", truncateString(resProgress.Error, 40))
+			}
+
+			content.WriteString(statusStyle.Render(line))
+			content.WriteString("\n")
+		}
+	}
+
+	// Error summary if there are errors
+	if len(progress.Errors) > 0 {
+		content.WriteString("\n")
+		errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+		content.WriteString(errorStyle.Render("⚠️  Errors encountered:"))
+		content.WriteString("\n")
+
+		for i, err := range progress.Errors {
+			if i >= 3 { // Limit to first 3 errors
+				content.WriteString(fmt.Sprintf("   ... and %d more errors\n", len(progress.Errors)-3))
+				break
+			}
+			content.WriteString(fmt.Sprintf("   • %s\n", truncateString(err, 60)))
+		}
+	}
+
+	// Footer with helpful information
+	content.WriteString("\n")
+	helpStyle := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("8"))
+	content.WriteString(helpStyle.Render("💡 Analyzing network connections and topology relationships..."))
+
+	return content.String()
+}
+
+// GetNetworkTopologyWithProgress loads network topology data with progress tracking
+func GetNetworkTopologyWithProgress(resourceGroup string, progressCallback ProgressCallback) (string, error) {
+	// Load dashboard with progress - topology uses the same data
+	dashboard, err := GetNetworkDashboardWithProgress(resourceGroup, progressCallback)
+	if err != nil && dashboard == nil {
+		return "", err
+	}
+
+	// Generate topology view from dashboard data
+	rows := [][]string{}
+	rows = append(rows, []string{"Connection Type", "Source", "Target", "Status", "Details"})
+
+	// VNet Peerings
+	for _, peering := range dashboard.Topology.PeeringStatus {
+		rows = append(rows, []string{
+			"🔗 VNet Peering",
+			peering.VNetName,
+			peering.PeerVNetName,
+			peering.PeeringState,
+			peering.ProvisioningState,
+		})
+	}
+
+	// Gateway connections
+	for _, gateway := range dashboard.Topology.GatewayStatus {
+		rows = append(rows, []string{
+			fmt.Sprintf("🚪 %s Gateway", gateway.Type),
+			gateway.VNetName,
+			gateway.Name,
+			gateway.Status,
+			"Gateway Connection",
+		})
+	}
+
+	// Add subnet to NSG associations
+	for _, vnet := range dashboard.VirtualNetworks {
+		for _, subnet := range vnet.Subnets {
+			if subnet.NSGName != "" {
+				rows = append(rows, []string{
+					"🔒 NSG Association",
+					fmt.Sprintf("%s/%s", vnet.Name, subnet.Name),
+					subnet.NSGName,
+					"Active",
+					"Subnet Protection",
+				})
+			}
+		}
 	}
 
 	return tui.RenderMatrixGraph(tui.MatrixGraphMsg{
-		Title: fmt.Sprintf("🌐 Azure Network Dashboard - %d VNets, %d NSGs, %d Routes",
-			dashboard.Summary.TotalVNets,
-			dashboard.Summary.TotalNSGs,
-			dashboard.Summary.TotalRoutes),
+		Title:  "🗺️ Network Topology & Connections",
 		Rows:   rows,
-		Labels: []string{"Type", "Name", "Location", "Resource Group", "Status", "Details"},
-	})
+		Labels: []string{"Type", "Source", "Target", "Status", "Details"},
+	}), nil
+}
+
+// formatResourceTypeName converts internal resource type names to user-friendly names
+func formatResourceTypeName(resType string) string {
+	switch resType {
+	case "VirtualNetworks":
+		return "Virtual Networks"
+	case "NetworkSecurityGroups":
+		return "Network Security Groups"
+	case "RouteTables":
+		return "Route Tables"
+	case "PublicIPs":
+		return "Public IP Addresses"
+	case "NetworkInterfaces":
+		return "Network Interfaces"
+	case "LoadBalancers":
+		return "Load Balancers"
+	case "Firewalls":
+		return "Azure Firewalls"
+	default:
+		return resType
+	}
 }
 
 // RenderVNetDetails renders detailed information for a specific VNet

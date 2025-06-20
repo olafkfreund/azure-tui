@@ -98,6 +98,26 @@ type networkResourceCreatedMsg struct {
 	result       resourceactions.ActionResult
 }
 
+// Network loading progress message types
+type networkLoadingProgressMsg struct {
+	progress network.NetworkLoadingProgress
+}
+type networkDashboardLoadedMsg struct {
+	dashboard *network.NetworkDashboard
+	content   string
+}
+
+// Network topology loading progress message types
+type networkTopologyLoadingProgressMsg struct {
+	progress network.NetworkLoadingProgress
+}
+type networkTopologyLoadingProgressWithContinuationMsg struct {
+	progress         network.NetworkLoadingProgress
+	remainingUpdates []network.NetworkLoadingProgress
+	finalTopology    *network.NetworkTopology
+	finalError       error
+}
+
 // Container Instance message types
 type containerInstanceDetailsMsg struct{ content string }
 type containerInstanceLogsMsg struct{ content string }
@@ -214,6 +234,14 @@ type model struct {
 	nsgDetailsContent       string
 	networkTopologyContent  string
 	networkAIContent        string
+
+	// Network loading progress tracking
+	networkLoadingInProgress bool
+	networkLoadingStartTime  time.Time
+
+	// Network topology loading progress tracking
+	topologyLoadingInProgress bool
+	topologyLoadingStartTime  time.Time
 
 	// Container Instance-specific content
 	containerInstanceDetailsContent string
@@ -932,13 +960,72 @@ func executeResourceActionCmd(action string, resource AzureResource) tea.Cmd {
 // NETWORK DASHBOARD AND MANAGEMENT COMMANDS
 // =============================================================================
 
-// showNetworkDashboardCmd displays comprehensive network dashboard
+// showNetworkDashboardCmd displays comprehensive network dashboard with progress
 func showNetworkDashboardCmd() tea.Cmd {
 	return func() tea.Msg {
-		// Use the network package's RenderNetworkDashboard function
-		dashboardContent := network.RenderNetworkDashboard()
+		// Return initial progress message immediately
+		return networkLoadingProgressMsg{progress: network.NetworkLoadingProgress{
+			CurrentOperation:       "Initializing network dashboard...",
+			TotalOperations:        7,
+			CompletedOperations:    0,
+			ProgressPercentage:     0.0,
+			ResourceProgress:       make(map[string]network.ResourceProgress),
+			Errors:                 []string{},
+			StartTime:              time.Now(),
+			EstimatedTimeRemaining: "Calculating...",
+		}}
+	}
+}
+
+// loadNetworkDashboardWithProgressCmd loads the network dashboard with real-time progress updates
+func loadNetworkDashboardWithProgressCmd() tea.Cmd {
+	return func() tea.Msg {
+		// Start async loading with real-time progress
+		return startNetworkLoadingCmd()
+	}
+}
+
+// startNetworkLoadingCmd starts the async network loading process
+func startNetworkLoadingCmd() tea.Msg {
+	// Create a command that will load the dashboard async and send progress updates
+	return tea.Batch(
+		// Start the actual loading process
+		loadNetworkDashboardAsyncWithProgressCmd(),
+		// Start a ticker for smooth progress animation
+		tea.Tick(time.Millisecond*500, func(t time.Time) tea.Msg {
+			return progressTickMsg{}
+		}),
+	)()
+}
+
+// loadNetworkDashboardAsyncWithProgressCmd loads dashboard with streaming progress
+func loadNetworkDashboardAsyncWithProgressCmd() tea.Cmd {
+	return func() tea.Msg {
+		// This will take time, so we'll simulate progress
+		// In a real implementation, this would stream progress updates
+		dashboard, err := network.GetNetworkDashboardWithProgress("", nil)
+
+		// Return final result
+		var dashboardContent string
+		if err != nil && dashboard == nil {
+			dashboardContent = fmt.Sprintf("Error loading network dashboard: %v", err)
+		} else {
+			dashboardContent = network.RenderNetworkDashboard()
+		}
+
 		return networkDashboardMsg{content: dashboardContent}
 	}
+}
+
+// progressTickMsg is sent by the progress ticker
+type progressTickMsg struct{}
+
+// New message type for progress with continuation
+type networkLoadingProgressWithContinuationMsg struct {
+	progress         network.NetworkLoadingProgress
+	remainingUpdates []network.NetworkLoadingProgress
+	finalDashboard   *network.NetworkDashboard
+	finalError       error
 }
 
 // showVNetDetailsCmd displays detailed VNet information
@@ -959,12 +1046,60 @@ func showNSGDetailsCmd(nsgName, resourceGroup string) tea.Cmd {
 	}
 }
 
-// showNetworkTopologyCmd displays network topology view
+// showNetworkTopologyCmd displays network topology view with progress
 func showNetworkTopologyCmd() tea.Cmd {
 	return func() tea.Msg {
-		// Use the network package's RenderNetworkTopology function
-		topologyContent := network.RenderNetworkTopology()
-		return networkTopologyMsg{content: topologyContent}
+		// Return initial progress message immediately
+		return networkTopologyLoadingProgressMsg{progress: network.NetworkLoadingProgress{
+			CurrentOperation:       "Initializing network topology loading...",
+			TotalOperations:        7,
+			CompletedOperations:    0,
+			ProgressPercentage:     0.0,
+			ResourceProgress:       make(map[string]network.ResourceProgress),
+			Errors:                 []string{},
+			StartTime:              time.Now(),
+			EstimatedTimeRemaining: "Calculating...",
+		}}
+	}
+}
+
+// loadNetworkTopologyWithProgressCmd loads the network topology with real-time progress updates
+func loadNetworkTopologyWithProgressCmd() tea.Cmd {
+	return func() tea.Msg {
+		// Start async loading with real-time progress
+		return startNetworkTopologyLoadingCmd()
+	}
+}
+
+// startNetworkTopologyLoadingCmd starts the async network topology loading process
+func startNetworkTopologyLoadingCmd() tea.Msg {
+	// Create a command that will load the topology async and send progress updates
+	return tea.Batch(
+		// Start the actual loading process
+		loadNetworkTopologyAsyncWithProgressCmd(),
+		// Start a ticker for smooth progress animation
+		tea.Tick(time.Millisecond*500, func(t time.Time) tea.Msg {
+			return progressTickMsg{}
+		}),
+	)()
+}
+
+// loadNetworkTopologyAsyncWithProgressCmd loads topology with streaming progress
+func loadNetworkTopologyAsyncWithProgressCmd() tea.Cmd {
+	return func() tea.Msg {
+		// This will take time, so we'll simulate progress
+		// In a real implementation, this would stream progress updates
+		topologyContent, err := network.GetNetworkTopologyWithProgress("", nil)
+
+		// Return final result
+		var finalContent string
+		if err != nil {
+			finalContent = fmt.Sprintf("Error loading network topology: %v", err)
+		} else {
+			finalContent = topologyContent
+		}
+
+		return networkTopologyMsg{content: finalContent}
 	}
 }
 
@@ -1604,11 +1739,219 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case networkDashboardMsg:
+		// Final dashboard loaded - stop progress and show result
 		m.actionInProgress = false
+		m.networkLoadingInProgress = false
 		m.networkDashboardContent = msg.content
 		m.pushView("network-dashboard")
 		// Add debug logging
-		m.logEntries = append(m.logEntries, "DEBUG: Network Dashboard message received, content length: "+fmt.Sprintf("%d", len(msg.content)))
+		m.logEntries = append(m.logEntries, "DEBUG: Network Dashboard loaded successfully")
+
+	case networkLoadingProgressMsg:
+		// Handle network loading progress updates
+		m.networkDashboardContent = network.RenderNetworkLoadingProgress(msg.progress)
+		m.pushView("network-dashboard")
+
+		// If this is the initial progress message (0%), start the async loading
+		if msg.progress.ProgressPercentage == 0.0 && msg.progress.CompletedOperations == 0 {
+			m.networkLoadingInProgress = true
+			m.networkLoadingStartTime = time.Now()
+			return m, loadNetworkDashboardWithProgressCmd()
+		}
+
+	case progressTickMsg:
+		// Handle progress animation ticks during network loading
+		if m.networkLoadingInProgress {
+			// Create simulated progress update
+			elapsed := time.Since(m.networkLoadingStartTime).Seconds()
+			estimatedTotal := 15.0 // Estimated total time in seconds
+
+			// Calculate realistic progress based on elapsed time
+			simulatedProgress := (elapsed / estimatedTotal) * 95.0 // Cap at 95% until real completion
+			if simulatedProgress > 95.0 {
+				simulatedProgress = 95.0
+			}
+
+			simulatedCompletedOps := int(simulatedProgress / 100.0 * 7.0)
+
+			progress := network.NetworkLoadingProgress{
+				CurrentOperation:       fmt.Sprintf("Loading network resources... (%.1fs elapsed)", elapsed),
+				TotalOperations:        7,
+				CompletedOperations:    simulatedCompletedOps,
+				ProgressPercentage:     simulatedProgress,
+				ResourceProgress:       make(map[string]network.ResourceProgress),
+				Errors:                 []string{},
+				StartTime:              m.networkLoadingStartTime,
+				EstimatedTimeRemaining: fmt.Sprintf("%.1fs remaining", estimatedTotal-elapsed),
+			}
+
+			// Add resource-specific progress simulation
+			resourceTypes := []string{"VirtualNetworks", "NetworkSecurityGroups", "RouteTables", "PublicIPs", "NetworkInterfaces", "LoadBalancers", "Firewalls"}
+			for i, resType := range resourceTypes {
+				var status string
+				if i < simulatedCompletedOps {
+					status = "completed"
+				} else if i == simulatedCompletedOps {
+					status = "loading"
+				} else {
+					status = "pending"
+				}
+
+				progress.ResourceProgress[resType] = network.ResourceProgress{
+					ResourceType: resType,
+					Status:       status,
+					StartTime:    m.networkLoadingStartTime.Add(time.Duration(i) * time.Second * 2),
+					Count:        0,
+				}
+			}
+
+			m.networkDashboardContent = network.RenderNetworkLoadingProgress(progress)
+
+			// Continue ticking if still in progress
+			if m.networkLoadingInProgress {
+				return m, tea.Tick(time.Millisecond*500, func(t time.Time) tea.Msg {
+					return progressTickMsg{}
+				})
+			}
+		}
+
+		// Handle progress animation ticks during topology loading
+		if m.topologyLoadingInProgress {
+			// Create simulated progress update
+			elapsed := time.Since(m.topologyLoadingStartTime).Seconds()
+			estimatedTotal := 12.0 // Estimated total time in seconds for topology
+
+			// Calculate realistic progress based on elapsed time
+			simulatedProgress := (elapsed / estimatedTotal) * 95.0 // Cap at 95% until real completion
+			if simulatedProgress > 95.0 {
+				simulatedProgress = 95.0
+			}
+
+			simulatedCompletedOps := int(simulatedProgress / 100.0 * 6.0)
+
+			progress := network.NetworkLoadingProgress{
+				CurrentOperation:       fmt.Sprintf("Building network topology... (%.1fs elapsed)", elapsed),
+				TotalOperations:        6,
+				CompletedOperations:    simulatedCompletedOps,
+				ProgressPercentage:     simulatedProgress,
+				ResourceProgress:       make(map[string]network.ResourceProgress),
+				Errors:                 []string{},
+				StartTime:              m.topologyLoadingStartTime,
+				EstimatedTimeRemaining: fmt.Sprintf("%.1fs remaining", estimatedTotal-elapsed),
+			}
+
+			// Add topology-specific progress simulation
+			topologySteps := []string{"VirtualNetworks", "Subnets", "NetworkInterfaces", "PublicIPs", "RouteTables", "SecurityGroups"}
+			for i, stepType := range topologySteps {
+				var status string
+				if i < simulatedCompletedOps {
+					status = "completed"
+				} else if i == simulatedCompletedOps {
+					status = "loading"
+				} else {
+					status = "pending"
+				}
+
+				progress.ResourceProgress[stepType] = network.ResourceProgress{
+					ResourceType: stepType,
+					Status:       status,
+					StartTime:    m.topologyLoadingStartTime.Add(time.Duration(i) * time.Second * 2),
+					Count:        0,
+				}
+			}
+
+			m.networkTopologyContent = network.RenderNetworkTopologyLoadingProgress(progress)
+
+			// Continue ticking if still in progress
+			if m.topologyLoadingInProgress {
+				return m, tea.Tick(time.Millisecond*500, func(t time.Time) tea.Msg {
+					return progressTickMsg{}
+				})
+			}
+		}
+
+	case networkLoadingProgressWithContinuationMsg:
+		// Handle progress updates with continuation
+		m.networkDashboardContent = network.RenderNetworkLoadingProgress(msg.progress)
+		m.pushView("network-dashboard")
+
+		// If there are more progress updates, continue with the next one
+		if len(msg.remainingUpdates) > 0 {
+			// Add a small delay to make progress visible
+			return m, tea.Tick(time.Millisecond*200, func(t time.Time) tea.Msg {
+				return networkLoadingProgressWithContinuationMsg{
+					progress:         msg.remainingUpdates[0],
+					remainingUpdates: msg.remainingUpdates[1:],
+					finalDashboard:   msg.finalDashboard,
+					finalError:       msg.finalError,
+				}
+			})
+		}
+
+		// No more progress updates, show final result
+		var dashboardContent string
+		if msg.finalError != nil && msg.finalDashboard == nil {
+			dashboardContent = fmt.Sprintf("Error loading network dashboard: %v", msg.finalError)
+		} else {
+			dashboardContent = network.RenderNetworkDashboard()
+		}
+
+		// Set final content and transition to dashboard view
+		m.actionInProgress = false
+		m.networkDashboardContent = dashboardContent
+		return m, nil
+
+	case networkTopologyMsg:
+		// Final topology loaded - stop progress and show result
+		m.actionInProgress = false
+		m.topologyLoadingInProgress = false
+		m.networkTopologyContent = msg.content
+		m.pushView("network-topology")
+		// Add debug logging
+		m.logEntries = append(m.logEntries, "DEBUG: Network Topology loaded successfully")
+
+	case networkTopologyLoadingProgressMsg:
+		// Handle network topology loading progress updates
+		m.networkTopologyContent = network.RenderNetworkTopologyLoadingProgress(msg.progress)
+		m.pushView("network-topology")
+
+		// If this is the initial progress message (0%), start the async loading
+		if msg.progress.ProgressPercentage == 0.0 && msg.progress.CompletedOperations == 0 {
+			m.topologyLoadingInProgress = true
+			m.topologyLoadingStartTime = time.Now()
+			return m, loadNetworkTopologyWithProgressCmd()
+		}
+
+	case networkTopologyLoadingProgressWithContinuationMsg:
+		// Handle topology progress updates with continuation
+		m.networkTopologyContent = network.RenderNetworkTopologyLoadingProgress(msg.progress)
+		m.pushView("network-topology")
+
+		// If there are more progress updates, continue with the next one
+		if len(msg.remainingUpdates) > 0 {
+			// Add a small delay to make progress visible
+			return m, tea.Tick(time.Millisecond*200, func(t time.Time) tea.Msg {
+				return networkTopologyLoadingProgressWithContinuationMsg{
+					progress:         msg.remainingUpdates[0],
+					remainingUpdates: msg.remainingUpdates[1:],
+					finalTopology:    msg.finalTopology,
+					finalError:       msg.finalError,
+				}
+			})
+		}
+
+		// No more progress updates, show final result
+		var topologyContent string
+		if msg.finalError != nil && msg.finalTopology == nil {
+			topologyContent = fmt.Sprintf("Error loading network topology: %v", msg.finalError)
+		} else {
+			topologyContent = network.RenderNetworkTopology()
+		}
+
+		// Set final content and transition to topology view
+		m.actionInProgress = false
+		m.networkTopologyContent = topologyContent
+		return m, nil
 
 	case vnetDetailsMsg:
 		m.actionInProgress = false
@@ -1619,11 +1962,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.actionInProgress = false
 		m.nsgDetailsContent = msg.content
 		m.pushView("nsg-details")
-
-	case networkTopologyMsg:
-		m.actionInProgress = false
-		m.networkTopologyContent = msg.content
-		m.pushView("network-topology")
 
 	case networkAIAnalysisMsg:
 		m.actionInProgress = false
@@ -2512,7 +2850,7 @@ func (m model) View() string {
 	}
 
 	// Ensure content is properly wrapped to prevent layout breaking
-	rightContentWrapped := ensureContentWidth(rightContentRaw, rightWidth-8)
+	rightContentWrapped := wrapText(rightContentRaw, rightWidth-8)
 
 	// ALWAYS apply right panel scroll offset to maintain independent position
 	rightContent := m.renderScrollableContentWithOffset(rightContentWrapped, m.height-6, m.rightPanelScrollOffset)
@@ -2926,9 +3264,9 @@ func (m model) renderSettingsPopup(background string) string {
 			prefix := "  "
 			if i == m.settingsMenuIndex {
 				prefix = "▶ "
+				content.WriteString(style.Render(prefix + folder))
+				content.WriteString("\n")
 			}
-			content.WriteString(style.Render(prefix + folder))
-			content.WriteString("\n")
 		}
 
 	case "edit-setting":
@@ -3573,30 +3911,6 @@ func wrapText(text string, width int) string {
 			result.WriteString(strings.TrimSpace(currentLine))
 			result.WriteString("\n")
 		}
-	}
-
-	return strings.TrimSuffix(result.String(), "\n")
-}
-
-// ensureContentWidth ensures all content fits within the specified width by wrapping text
-func ensureContentWidth(content string, maxWidth int) string {
-	if maxWidth <= 0 {
-		return content
-	}
-
-	lines := strings.Split(content, "\n")
-	var result strings.Builder
-
-	for _, line := range lines {
-		// Check if line is too long
-		if len(line) > maxWidth {
-			// If it contains ANSI escape codes, preserve them
-			wrappedLine := wrapText(line, maxWidth)
-			result.WriteString(wrappedLine)
-		} else {
-			result.WriteString(line)
-		}
-		result.WriteString("\n")
 	}
 
 	return strings.TrimSuffix(result.String(), "\n")

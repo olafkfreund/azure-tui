@@ -1279,7 +1279,7 @@ func RenderTable(data TableData) string {
 		content.WriteString("\n")
 	}
 
-	return content.String()
+	return RenderTable(data)
 }
 
 // FormatPropertiesAsTable formats resource properties as a table
