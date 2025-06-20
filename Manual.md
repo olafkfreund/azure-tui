@@ -4,13 +4,15 @@
 
 1. [Getting Started](#getting-started)
 2. [Interface Overview](#interface-overview)  
-3. [Real-World Examples](#real-world-examples)
-4. [Advanced Features](#advanced-features)
-5. [Troubleshooting](#troubleshooting)
-6. [Best Practices](#best-practices)
-7. [Integration Examples](#integration-examples)
+3. [AI Configuration](#ai-configuration)
+4. [Storage Management](#storage-management)
+5. [Real-World Examples](#real-world-examples)
+6. [Advanced Features](#advanced-features)
+7. [Troubleshooting](#troubleshooting)
+8. [Best Practices](#best-practices)
+9. [Integration Examples](#integration-examples)
 
-**New in this version**: Enhanced navigation system with panel switching, property expansion, and improved AKS resource management.
+**New in this version**: Enhanced navigation system with panel switching, property expansion, AI configuration control, and comprehensive storage management.
 
 ---
 
@@ -127,6 +129,258 @@ DEMO_MODE=true ./aztui
 │   🗂️  backup-storage-rg         │ │   💾 webappstorageacct             │
 └─────────────────────────────────┘ └─────────────────────────────────────┘
 ```
+
+---
+
+## AI Configuration
+
+### AI Analysis Behavior
+
+Azure TUI now provides **manual AI analysis by default** for better control and reduced API usage. This represents a significant change from previous versions.
+
+#### Default Behavior (Manual AI)
+
+By default, AI analysis requires **manual trigger**:
+
+- **Trigger**: Press `a` key when any resource is selected
+- **Scope**: Analyzes the currently selected resource only
+- **Benefits**: 
+  - Reduces unnecessary API calls
+  - Gives users full control over when AI analysis occurs
+  - Minimizes costs for OpenAI API usage
+  - Prevents automatic analysis on resource navigation
+
+#### Automatic AI Analysis (Optional)
+
+To enable automatic AI analysis (previous behavior), set the environment variable:
+
+```bash
+export AZURE_TUI_AUTO_AI="true"
+```
+
+With automatic mode enabled:
+- AI analysis triggers automatically when resources are selected
+- Analysis occurs in the background during navigation
+- Higher API usage and potential costs
+- Continuous insights without manual intervention
+
+### Environment Variables for AI
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AZURE_TUI_AUTO_AI` | `false` | Enable automatic AI analysis on resource selection |
+| `OPENAI_API_KEY` | - | OpenAI API key for AI features |
+| `OPENAI_MODEL` | `gpt-4` | AI model to use for analysis |
+| `GITHUB_TOKEN` | - | GitHub token for Copilot integration |
+| `USE_GITHUB_COPILOT` | auto-detect | Use GitHub Copilot instead of OpenAI |
+
+### AI Configuration Examples
+
+#### Basic Manual AI Setup
+```bash
+# Set OpenAI API key (required)
+export OPENAI_API_KEY="sk-your-openai-api-key"
+
+# Launch Azure TUI (manual AI mode by default)
+./aztui
+
+# Use: Navigate to any resource and press 'a' for AI analysis
+```
+
+#### Automatic AI Setup
+```bash
+# Enable automatic AI analysis
+export AZURE_TUI_AUTO_AI="true"
+export OPENAI_API_KEY="sk-your-openai-api-key"
+
+# Launch Azure TUI
+./aztui
+
+# Use: AI analysis will trigger automatically when selecting resources
+```
+
+#### GitHub Copilot Setup
+```bash
+# Use GitHub Copilot for AI analysis
+export GITHUB_TOKEN="your-github-token"
+export USE_GITHUB_COPILOT="true"
+
+# Optional: Enable automatic mode with Copilot
+export AZURE_TUI_AUTO_AI="true"
+
+./aztui
+```
+
+### AI Features Available
+
+When AI is configured (either manual or automatic), you can access:
+
+- **Resource Analysis** (`a`): Comprehensive resource insights and recommendations
+- **Cost Optimization** (`O`): AI-driven cost savings analysis
+- **Infrastructure as Code** (`T`/`B`): Generate Terraform and Bicep templates
+- **Security Assessment**: Security posture evaluation and recommendations
+- **Performance Insights**: Resource utilization and optimization suggestions
+
+### Best Practices for AI Configuration
+
+1. **Start with Manual Mode**: Use default manual AI mode to understand analysis patterns
+2. **Monitor API Usage**: Track OpenAI API usage, especially with automatic mode
+3. **Use Specific Analysis**: Press `a` only on resources you need detailed insights for
+4. **Consider GitHub Copilot**: Often provides better Azure-specific recommendations
+5. **Environment-Specific Setup**: Use automatic mode in development, manual in production
+
+---
+
+## Storage Management
+
+Azure TUI provides comprehensive storage account management with intuitive keyboard shortcuts and real-time progress tracking.
+
+### Storage Operations Overview
+
+When a **Storage Account** is selected, Azure TUI provides dedicated storage management capabilities:
+
+| Operation | Key | Description | Progress Tracking |
+|-----------|-----|-------------|-------------------|
+| List Containers | `T` | Show all blob containers | ✅ With progress bar |
+| Create Container | `Shift+T` | Create new blob container | ✅ With feedback |
+| List Blobs | `B` | Show blobs in container | ✅ With progress bar |
+| Upload Blob | `U` | Upload file to container | ✅ With progress |
+| Delete Items | `Ctrl+X` | Delete containers/blobs | ✅ With confirmation |
+
+### Storage Workflow
+
+#### 1. Container Management
+
+**Navigation Flow**:
+```
+Storage Account → [T] → Container List → [B] → Blob List → [Enter] → Blob Details
+```
+
+**Container Operations**:
+- **View Containers**: Press `T` to list all containers with metadata
+- **Create Container**: Press `Shift+T` to create a new blob container
+- **Container Details**: Shows last modified, public access, metadata, and lease status
+
+**Example Container View**:
+```
+🗄️  Storage Containers in 'webappstorageacct'
+═══════════════════════════════════════════════════════════════
+
+📋 Container Inventory:
+• web-assets (🟢 Available)
+  Last Modified: 2024-01-15T10:30:00Z
+  Public Access: blob
+
+• backup-data (🔒 Leased)
+  Last Modified: 2024-01-14T08:15:00Z
+  Metadata: environment=production, backup=daily
+
+Available Actions:
+• Press 'B' to list blobs in a container
+• Press 'Shift+T' to create a new container
+• Press 'Ctrl+X' to delete a container
+```
+
+#### 2. Blob Management
+
+**Blob Operations**:
+- **View Blobs**: Press `B` from container list to show all blobs
+- **Upload Blob**: Press `U` to upload files to the current container
+- **Delete Blob**: Press `Ctrl+X` to delete selected blobs
+- **Blob Details**: Shows size, content type, access tier, tags, and metadata
+
+**Example Blob View**:
+```
+📁 Blobs in Container 'web-assets' (Account: webappstorageacct)
+═══════════════════════════════════════════════════════════════
+
+📋 Blob Inventory:
+🧱 index.html (2.5 KB)
+   Type: text/html
+   Modified: 2024-01-15T10:30:00Z
+   Access Tier: Hot
+
+📄 styles.css (15.7 KB)
+   Type: text/css
+   Modified: 2024-01-15T09:45:00Z
+   Access Tier: Hot
+
+🖼️ logo.png (45.2 KB)
+   Type: image/png
+   Modified: 2024-01-14T16:20:00Z
+   Access Tier: Hot
+
+Available Actions:
+• Press 'U' to upload a new blob
+• Press 'Ctrl+X` to delete a blob
+• Press 'Esc' to go back to containers
+```
+
+### Progress Tracking System
+
+Azure TUI implements comprehensive progress tracking for all storage operations:
+
+#### Loading Indicators
+- **Container Loading**: Visual progress bar when fetching containers
+- **Blob Loading**: Progress tracking during blob enumeration
+- **Operation Status**: Real-time feedback for create/delete operations
+- **Error Handling**: Clear error messages with troubleshooting guidance
+
+#### Progress Flow
+```
+Operation Start → Progress Updates → Completion/Error → Result Display
+      ↓               ↓                    ↓              ↓
+   Loading...     [████████░░] 80%     Success!      Show Results
+```
+
+### Enhanced User Feedback
+
+#### Empty State Handling
+
+**No Containers Found**:
+```
+📭 No containers found in this storage account.
+
+This might happen because:
+   • Storage account is newly created
+   • Containers were deleted or moved
+   • Access permissions are insufficient
+   • Check Azure portal for container visibility
+   • Verify storage account permissions
+   • Refresh the view with 'R'
+
+Available Actions:
+• Press 'Shift+T' to create a new container
+• Press 'R' to refresh the container list
+• Press 'Esc' to go back
+```
+
+**No Blobs Found**:
+```
+📭 No blobs found in container 'web-assets'.
+
+This might happen because:
+   • Container is empty or newly created
+   • Blobs were deleted or moved to another container
+   • Prefix/filter settings exclude visible blobs
+   • Press 'U' to upload a blob to this container
+   • Check other containers for your files
+   • Verify blob naming and paths
+   • Use Azure Storage Explorer for detailed view
+
+Available Actions:
+• Press 'U' to upload a blob
+• Press 'R' to refresh the blob list
+• Press 'Esc' to go back to containers
+```
+
+### Storage Management Best Practices
+
+1. **Navigation**: Use `Esc` key to navigate back through storage views
+2. **Refresh**: Press `R` to refresh container or blob lists when needed
+3. **Progress**: Wait for progress completion before initiating new operations
+4. **Error Handling**: Review error messages for troubleshooting guidance
+5. **Permissions**: Ensure proper storage account access permissions
 
 ---
 
@@ -798,13 +1052,16 @@ ai:
 | **Tabs** | `Tab` | Panel/Tab Cycle | Switch panels or content tabs |
 | | `Shift+Tab` | Previous Tab | Switch to previous tab |
 | | `Ctrl+W` | Close Tab | Close current content tab |
-| **Actions** | `a` | AI Analysis | Get AI insights |
+| **Actions** | `a` | AI Analysis | Get AI insights (manual trigger by default) |
 | | `Ctrl+T` | Terraform Manager | Open Terraform integration |
 | | `M` | Metrics | Show performance dashboard |
 | | `E` | Edit | Resource configuration editor |
-| | `T` | Terraform | Generate Terraform code |
-| | `B` | Bicep | Generate Bicep template |
+| | `T` | List Containers | List storage containers (Storage Accounts) |
+| | `Shift+T` | Create Container | Create storage container (Storage Accounts) |
+| | `B` | List Blobs | List blobs in container (Storage) / Generate Bicep template (other resources) |
+| | `U` | Upload Blob | Upload blob to container (Storage Accounts) |
 | | `O` | Optimize | Cost optimization analysis |
+| | `Ctrl+X` | Delete Storage | Delete containers/blobs (Storage Accounts) |
 | | `Ctrl+D` | Delete | Safe resource deletion |
 | **Interface** | `F2` | Toggle Mode | Switch tree/traditional view |
 | | `?` | Help | Show shortcuts |
@@ -842,6 +1099,22 @@ export OPENAI_API_KEY="your-api-key"
 # Or add to your shell profile
 echo 'export OPENAI_API_KEY="your-api-key"' >> ~/.bashrc
 source ~/.bashrc
+```
+
+#### "AI analysis not working / No AI response"
+
+```bash
+# Check if AI is in manual mode (default)
+# Press 'a' key to manually trigger AI analysis
+
+# For automatic AI analysis, set environment variable:
+export AZURE_TUI_AUTO_AI="true"
+
+# Verify API key is set correctly
+echo $OPENAI_API_KEY
+
+# Test API connectivity
+curl -H "Authorization: Bearer $OPENAI_API_KEY" https://api.openai.com/v1/models
 ```
 
 #### "Tree view not displaying properly"

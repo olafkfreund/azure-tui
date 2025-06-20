@@ -24,7 +24,8 @@ A modern, **NeoVim-style Terminal User Interface** for managing Azure resources 
 - **Mouse Support**: Scroll wheel navigation and click interactions
 
 ### 🤖 **AI-Powered Resource Management**
-- **Intelligent Analysis** (`a`): AI-powered resource insights and recommendations
+- **Manual AI Analysis** (`a`): AI-powered resource insights and recommendations (manual trigger by default)
+- **Automatic AI Mode**: Set `AZURE_TUI_AUTO_AI="true"` to enable automatic analysis on resource selection
 - **Code Generation**: Generate Terraform (`T`) and Bicep (`B`) templates
 - **Cost Optimization** (`O`): AI-driven cost savings suggestions
 - **Security Analysis**: Automated security posture assessment
@@ -48,7 +49,9 @@ A modern, **NeoVim-style Terminal User Interface** for managing Azure resources 
 - **📊 Table-Formatted Properties**: Resource properties displayed in organized tables with intelligent formatting
 - **🔐 Enhanced SSH for VMs**: Direct SSH (`c`) and Bastion (`b`) connections with automatic IP detection
 - **🚢 Comprehensive AKS Management**: Full kubectl integration with pod (`p`), deployment (`D`), node (`n`), and service (`v`) management
-- **💾 Storage Account Management**: Complete container and blob management with upload (`U`), list (`T`), and delete (`Ctrl+X`) operations
+- **💾 Storage Account Management**: Complete container and blob management with upload (`U`), list (`T`/`Shift+T`), and delete (`Ctrl+X`) operations
+- **🤖 Manual AI Analysis**: AI analysis now requires manual trigger (`a` key) by default - set `AZURE_TUI_AUTO_AI="true"` for automatic analysis
+- **📊 Progress Tracking**: Visual progress bars for storage operations and resource loading
 - **⚡ Real-time Actions**: Start (`s`), stop (`S`), restart (`r`) operations with visual feedback
 - **🎮 Intuitive Controls**: Enhanced keyboard shortcuts and visual indicators for all operations
 
@@ -96,13 +99,20 @@ DEMO_MODE=true ./aztui
 - **Close Tab**: `Ctrl+W` to close active tab
 
 ### Resource Actions
-- **AI Analysis**: `a` - Get AI insights for selected resource
+- **AI Analysis**: `a` - Get AI insights for selected resource (manual trigger by default)
 - **Metrics Dashboard**: `M` - View real-time resource metrics
 - **Edit Configuration**: `E` - Safely modify resource settings
 - **Generate Terraform**: `T` - Create Terraform code
 - **Generate Bicep**: `B` - Create Bicep templates
 - **Cost Analysis**: `O` - Get optimization suggestions
 - **Delete Resource**: `Ctrl+D` - Safe deletion with confirmation
+
+### Storage Management (when Storage Account selected)
+- **List Containers**: `T` - Show all containers with progress tracking
+- **Create Container**: `Shift+T` - Create a new blob container
+- **List Blobs**: `B` - Show blobs in selected container
+- **Upload Blob**: `U` - Upload file to container
+- **Delete Storage Items**: `Ctrl+X` - Delete containers or blobs
 
 ### Interface Modes
 - **Tree View** (default): NeoVim-style interface with tree + content tabs
@@ -127,6 +137,9 @@ export OPENAI_API_KEY="your-openai-api-key"
 # Option 2: GitHub Copilot (Recommended)
 export GITHUB_TOKEN="your-github-token"
 export USE_GITHUB_COPILOT="true"  # optional, auto-detected if GITHUB_TOKEN is set
+
+# AI Behavior Configuration
+export AZURE_TUI_AUTO_AI="true"  # Enable automatic AI analysis (default: manual-only)
 
 # Application Settings
 export DEMO_MODE="true"  # Run without Azure credentials

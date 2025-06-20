@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // Container represents a blob container in a storage account
@@ -51,6 +53,161 @@ type StorageAccount struct {
 	AllowBlobPublicAccess  bool   `json:"allowBlobPublicAccess,omitempty"`
 }
 
+// StorageLoadingProgress tracks the progress of storage operations
+type StorageLoadingProgress struct {
+	CurrentOperation       string
+	ProgressPercentage     float64
+	CompletedOperations    int
+	TotalOperations        int
+	StartTime              time.Time
+	EstimatedTimeRemaining string
+	StorageProgress        map[string]StorageOperationProgress
+	Errors                 []string
+}
+
+// StorageOperationProgress tracks individual storage operation progress
+type StorageOperationProgress struct {
+	OperationType string
+	Status        string // "pending", "loading", "completed", "failed"
+	StartTime     time.Time
+	EndTime       time.Time
+	Error         string
+	Count         int
+}
+
+// RenderStorageLoadingProgress renders a progress bar for storage operations
+func RenderStorageLoadingProgress(progress StorageLoadingProgress) string {
+	var content strings.Builder
+
+	// Header
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Padding(0, 1)
+	content.WriteString(headerStyle.Render("💾 Loading Storage Data"))
+	content.WriteString("\n\n")
+
+	// Current operation
+	operationStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
+	content.WriteString(operationStyle.Render(fmt.Sprintf("📋 %s", progress.CurrentOperation)))
+	content.WriteString("\n\n")
+
+	// Overall progress bar
+	progressBarWidth := 50
+	filledWidth := int(float64(progressBarWidth) * progress.ProgressPercentage / 100.0)
+	emptyWidth := progressBarWidth - filledWidth
+
+	progressBar := strings.Repeat("█", filledWidth) + strings.Repeat("░", emptyWidth)
+	progressStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("10"))
+	content.WriteString(fmt.Sprintf("Progress: [%s] %.1f%% (%d/%d)",
+		progressStyle.Render(progressBar),
+		progress.ProgressPercentage,
+		progress.CompletedOperations,
+		progress.TotalOperations))
+	content.WriteString("\n\n")
+
+	// Time information
+	elapsed := time.Since(progress.StartTime)
+	timeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("8"))
+	content.WriteString(timeStyle.Render(fmt.Sprintf("⏱️  Elapsed: %.1fs | %s", elapsed.Seconds(), progress.EstimatedTimeRemaining)))
+	content.WriteString("\n\n")
+
+	// Detailed storage operation progress
+	content.WriteString("💾 Storage Operation Status:\n")
+	content.WriteString(strings.Repeat("─", 70) + "\n")
+
+	// Sort operation types for consistent display
+	operationTypes := []string{"ContainerList", "BlobList", "ContainerCreate", "BlobUpload", "Delete"}
+
+	for _, opType := range operationTypes {
+		if opProgress, exists := progress.StorageProgress[opType]; exists {
+			var statusIcon, statusColor string
+
+			switch opProgress.Status {
+			case "pending":
+				statusIcon = "⏳"
+				statusColor = "8" // Gray
+			case "loading":
+				statusIcon = "🔄"
+				statusColor = "11" // Yellow
+			case "completed":
+				statusIcon = "✅"
+				statusColor = "10" // Green
+			case "failed":
+				statusIcon = "❌"
+				statusColor = "9" // Red
+			default:
+				statusIcon = "❔"
+				statusColor = "8"
+			}
+
+			statusStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(statusColor))
+			operationName := formatStorageOperationName(opType)
+
+			line := fmt.Sprintf("%s %s", statusIcon, operationName)
+
+			// Add count information if completed
+			if opProgress.Status == "completed" && opProgress.Count > 0 {
+				line += fmt.Sprintf(" (%d items)", opProgress.Count)
+			}
+
+			// Add error information if failed
+			if opProgress.Status == "failed" && opProgress.Error != "" {
+				line += fmt.Sprintf(" - %s", truncateString(opProgress.Error, 40))
+			}
+
+			content.WriteString(statusStyle.Render(line))
+			content.WriteString("\n")
+		}
+	}
+
+	// Error summary if there are errors
+	if len(progress.Errors) > 0 {
+		content.WriteString("\n")
+		errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
+		content.WriteString(errorStyle.Render("⚠️  Errors encountered:"))
+		content.WriteString("\n")
+
+		for i, err := range progress.Errors {
+			if i >= 3 { // Limit to first 3 errors
+				content.WriteString(fmt.Sprintf("   ... and %d more errors\n", len(progress.Errors)-3))
+				break
+			}
+			content.WriteString(fmt.Sprintf("   • %s\n", truncateString(err, 60)))
+		}
+	}
+
+	// Footer with helpful information
+	content.WriteString("\n")
+	helpStyle := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("8"))
+	content.WriteString(helpStyle.Render("💡 Storage operations may take a few moments depending on account size"))
+
+	return content.String()
+}
+
+// formatStorageOperationName formats operation type names for display
+func formatStorageOperationName(opType string) string {
+	switch opType {
+	case "ContainerList":
+		return "Listing Containers"
+	case "BlobList":
+		return "Listing Blobs"
+	case "ContainerCreate":
+		return "Creating Container"
+	case "BlobUpload":
+		return "Uploading Blob"
+	case "Delete":
+		return "Deleting Item"
+	default:
+		return strings.Title(strings.ToLower(opType))
+	}
+}
+
+// truncateString truncates a string to a maximum length
+func truncateString(s string, maxLen int) string {
+	if len(s) <= maxLen {
+		return s
+	}
+	return s[:maxLen-3] + "..."
+}
+
 // ListContainers lists all blob containers in a storage account
 func ListContainers(accountName string) ([]Container, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -71,6 +228,71 @@ func ListContainers(accountName string) ([]Container, error) {
 	}
 
 	return containers, nil
+}
+
+// ListContainersWithProgress lists containers with progress tracking
+func ListContainersWithProgress(accountName string, progressCallback func(StorageLoadingProgress)) ([]Container, error) {
+	progress := StorageLoadingProgress{
+		CurrentOperation:    "Initializing container listing...",
+		ProgressPercentage:  0,
+		CompletedOperations: 0,
+		TotalOperations:     1,
+		StartTime:           time.Now(),
+		StorageProgress: map[string]StorageOperationProgress{
+			"ContainerList": {
+				OperationType: "ContainerList",
+				Status:        "loading",
+				StartTime:     time.Now(),
+			},
+		},
+		Errors: []string{},
+	}
+
+	if progressCallback != nil {
+		progressCallback(progress)
+	}
+
+	// Simulate progress updates
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		progress.CurrentOperation = "Fetching container data from Azure..."
+		progress.ProgressPercentage = 50
+		if progressCallback != nil {
+			progressCallback(progress)
+		}
+	}()
+
+	containers, err := ListContainers(accountName)
+
+	// Update final progress
+	if err != nil {
+		progress.StorageProgress["ContainerList"] = StorageOperationProgress{
+			OperationType: "ContainerList",
+			Status:        "failed",
+			StartTime:     progress.StorageProgress["ContainerList"].StartTime,
+			EndTime:       time.Now(),
+			Error:         err.Error(),
+		}
+		progress.Errors = append(progress.Errors, err.Error())
+	} else {
+		progress.StorageProgress["ContainerList"] = StorageOperationProgress{
+			OperationType: "ContainerList",
+			Status:        "completed",
+			StartTime:     progress.StorageProgress["ContainerList"].StartTime,
+			EndTime:       time.Now(),
+			Count:         len(containers),
+		}
+		progress.CompletedOperations = 1
+	}
+
+	progress.CurrentOperation = "Container listing completed"
+	progress.ProgressPercentage = 100
+
+	if progressCallback != nil {
+		progressCallback(progress)
+	}
+
+	return containers, err
 }
 
 // ListBlobs lists all blobs in a specific container
@@ -99,6 +321,71 @@ func ListBlobs(accountName, containerName string) ([]Blob, error) {
 	}
 
 	return blobs, nil
+}
+
+// ListBlobsWithProgress lists blobs with progress tracking
+func ListBlobsWithProgress(accountName, containerName string, progressCallback func(StorageLoadingProgress)) ([]Blob, error) {
+	progress := StorageLoadingProgress{
+		CurrentOperation:    fmt.Sprintf("Initializing blob listing for container '%s'...", containerName),
+		ProgressPercentage:  0,
+		CompletedOperations: 0,
+		TotalOperations:     1,
+		StartTime:           time.Now(),
+		StorageProgress: map[string]StorageOperationProgress{
+			"BlobList": {
+				OperationType: "BlobList",
+				Status:        "loading",
+				StartTime:     time.Now(),
+			},
+		},
+		Errors: []string{},
+	}
+
+	if progressCallback != nil {
+		progressCallback(progress)
+	}
+
+	// Simulate progress updates
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		progress.CurrentOperation = fmt.Sprintf("Fetching blob data from container '%s'...", containerName)
+		progress.ProgressPercentage = 50
+		if progressCallback != nil {
+			progressCallback(progress)
+		}
+	}()
+
+	blobs, err := ListBlobs(accountName, containerName)
+
+	// Update final progress
+	if err != nil {
+		progress.StorageProgress["BlobList"] = StorageOperationProgress{
+			OperationType: "BlobList",
+			Status:        "failed",
+			StartTime:     progress.StorageProgress["BlobList"].StartTime,
+			EndTime:       time.Now(),
+			Error:         err.Error(),
+		}
+		progress.Errors = append(progress.Errors, err.Error())
+	} else {
+		progress.StorageProgress["BlobList"] = StorageOperationProgress{
+			OperationType: "BlobList",
+			Status:        "completed",
+			StartTime:     progress.StorageProgress["BlobList"].StartTime,
+			EndTime:       time.Now(),
+			Count:         len(blobs),
+		}
+		progress.CompletedOperations = 1
+	}
+
+	progress.CurrentOperation = fmt.Sprintf("Blob listing completed for container '%s'", containerName)
+	progress.ProgressPercentage = 100
+
+	if progressCallback != nil {
+		progressCallback(progress)
+	}
+
+	return blobs, err
 }
 
 // CreateContainer creates a new blob container
@@ -203,8 +490,20 @@ func RenderStorageContainersView(accountName string, containers []Container) str
 
 	if len(containers) == 0 {
 		content.WriteString("📭 No containers found in this storage account.\n\n")
+		content.WriteString("📋 Why might this happen?\n")
+		content.WriteString("   • Storage account is newly created\n")
+		content.WriteString("   • Containers were deleted or moved\n")
+		content.WriteString("   • Access permissions may be limited\n")
+		content.WriteString("   • Container names may not match filters\n\n")
+		content.WriteString("🔧 What you can do:\n")
+		content.WriteString("   • Press 'Shift+T' to create a new container\n")
+		content.WriteString("   • Check Azure portal for container visibility\n")
+		content.WriteString("   • Verify storage account permissions\n")
+		content.WriteString("   • Refresh the view with 'R'\n\n")
 		content.WriteString("Available Actions:\n")
-		content.WriteString("• Press 'Shift+S' to create a new container\n")
+		content.WriteString("• Press 'Shift+T' to create a new container\n")
+		content.WriteString("• Press 'R' to refresh the container list\n")
+		content.WriteString("• Press 'Esc' to go back\n")
 		return content.String()
 	}
 
@@ -253,8 +552,19 @@ func RenderStorageBlobsView(accountName, containerName string, blobs []Blob) str
 
 	if len(blobs) == 0 {
 		content.WriteString("📭 No blobs found in this container.\n\n")
+		content.WriteString("📋 Why might this be empty?\n")
+		content.WriteString("   • Container is newly created\n")
+		content.WriteString("   • Blobs were deleted or moved\n")
+		content.WriteString("   • Files may be in different containers\n")
+		content.WriteString("   • Blob names may not match filters\n\n")
+		content.WriteString("🔧 What you can do:\n")
+		content.WriteString("   • Press 'U' to upload a blob to this container\n")
+		content.WriteString("   • Check other containers for your files\n")
+		content.WriteString("   • Verify blob naming and paths\n")
+		content.WriteString("   • Use Azure Storage Explorer for detailed view\n\n")
 		content.WriteString("Available Actions:\n")
 		content.WriteString("• Press 'U' to upload a blob\n")
+		content.WriteString("• Press 'R' to refresh the blob list\n")
 		content.WriteString("• Press 'Esc' to go back to containers\n")
 		return content.String()
 	}

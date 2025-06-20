@@ -204,6 +204,23 @@ type storageActionMsg struct {
 	result resourceactions.ActionResult
 }
 
+// Storage progress message types
+type storageLoadingStartMsg struct {
+	operation   string
+	accountName string
+}
+
+type storageLoadingProgressMsg struct {
+	progress storage.StorageLoadingProgress
+}
+
+type storageLoadingCompleteMsg struct {
+	operation string
+	success   bool
+	data      interface{}
+	error     error
+}
+
 // Subscription selection message types
 type currentSubscriptionMsg struct {
 	subscription *Subscription
@@ -1425,25 +1442,63 @@ func deleteKeyVaultSecretCmd(vaultName, secretName string) tea.Cmd {
 // STORAGE ACCOUNT MANAGEMENT COMMANDS
 // =============================================================================
 
-// listStorageContainersCmd lists all containers in a storage account
+// listStorageContainersCmd lists all containers in a storage account with progress
 func listStorageContainersCmd(accountName string) tea.Cmd {
 	return func() tea.Msg {
-		containers, err := storage.ListContainers(accountName)
-		if err != nil {
-			return errorMsg{error: fmt.Sprintf("Failed to list containers: %v", err)}
+		// Start with progress tracking
+		return storageLoadingStartMsg{
+			operation:   "containers",
+			accountName: accountName,
 		}
-		return storageContainersMsg{accountName: accountName, containers: containers}
 	}
 }
 
-// listStorageBlobsCmd lists all blobs in a container
+// listStorageContainersWithProgressCmd performs the actual container listing with progress
+func listStorageContainersWithProgressCmd(accountName string) tea.Cmd {
+	return func() tea.Msg {
+		containers, err := storage.ListContainersWithProgress(accountName, nil)
+		if err != nil {
+			return storageLoadingCompleteMsg{
+				operation: "containers",
+				success:   false,
+				error:     err,
+			}
+		}
+		return storageLoadingCompleteMsg{
+			operation: "containers",
+			success:   true,
+			data:      containers,
+		}
+	}
+}
+
+// listStorageBlobsCmd lists all blobs in a container with progress
 func listStorageBlobsCmd(accountName, containerName string) tea.Cmd {
 	return func() tea.Msg {
-		blobs, err := storage.ListBlobs(accountName, containerName)
-		if err != nil {
-			return errorMsg{error: fmt.Sprintf("Failed to list blobs: %v", err)}
+		// Start with progress tracking
+		return storageLoadingStartMsg{
+			operation:   "blobs",
+			accountName: accountName,
 		}
-		return storageBlobsMsg{accountName: accountName, containerName: containerName, blobs: blobs}
+	}
+}
+
+// listStorageBlobsWithProgressCmd performs the actual blob listing with progress
+func listStorageBlobsWithProgressCmd(accountName, containerName string) tea.Cmd {
+	return func() tea.Msg {
+		blobs, err := storage.ListBlobsWithProgress(accountName, containerName, nil)
+		if err != nil {
+			return storageLoadingCompleteMsg{
+				operation: "blobs",
+				success:   false,
+				error:     err,
+			}
+		}
+		return storageLoadingCompleteMsg{
+			operation: "blobs",
+			success:   true,
+			data:      blobs,
+		}
 	}
 }
 
@@ -1806,8 +1861,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case resourceDetailsLoadedMsg:
 		m.selectedResource = &msg.resource
 		m.resourceDetails = msg.details
-		// Only automatically load AI description if auto-analysis is enabled and provider is available
-		autoAI := os.Getenv("AZURE_TUI_AUTO_AI") != "false" // Default to true unless explicitly disabled
+		// AI analysis is now manual-only by default - users must press 'a' to trigger
+		// Auto-analysis can be enabled by setting AZURE_TUI_AUTO_AI="true"
+		autoAI := os.Getenv("AZURE_TUI_AUTO_AI") == "true" // Default to false - manual trigger only
 		if m.aiProvider != nil && autoAI {
 			m.actionInProgress = true
 			return m, loadAIDescriptionCmd(m.aiProvider, msg.resource, msg.details)
@@ -2217,6 +2273,66 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastActionResult = &msg.result
 		if msg.result.Success {
 			return m, listKeyVaultSecretsCmd(m.selectedResource.Name)
+		}
+
+	// Storage Progress message handlers
+	case storageLoadingStartMsg:
+		m.actionInProgress = true
+		switch msg.operation {
+		case "containers":
+			// Start container loading with progress
+			progress := storage.StorageLoadingProgress{
+				CurrentOperation:    "Starting container listing...",
+				TotalOperations:     1,
+				CompletedOperations: 0,
+				ProgressPercentage:  0.0,
+				StartTime:           time.Now(),
+			}
+			m.storageContainersContent = storage.RenderStorageLoadingProgress(progress)
+			m.pushView("storage-containers")
+			return m, listStorageContainersWithProgressCmd(msg.accountName)
+		case "blobs":
+			// Start blob loading with progress
+			progress := storage.StorageLoadingProgress{
+				CurrentOperation:    "Starting blob listing...",
+				TotalOperations:     1,
+				CompletedOperations: 0,
+				ProgressPercentage:  0.0,
+				StartTime:           time.Now(),
+			}
+			m.storageBlobsContent = storage.RenderStorageLoadingProgress(progress)
+			m.pushView("storage-blobs")
+			return m, listStorageBlobsWithProgressCmd(msg.accountName, m.currentContainer)
+		}
+
+	case storageLoadingProgressMsg:
+		// Update progress display
+		switch m.activeView {
+		case "storage-containers":
+			m.storageContainersContent = storage.RenderStorageLoadingProgress(msg.progress)
+		case "storage-blobs":
+			m.storageBlobsContent = storage.RenderStorageLoadingProgress(msg.progress)
+		}
+
+	case storageLoadingCompleteMsg:
+		m.actionInProgress = false
+		if msg.success {
+			switch msg.operation {
+			case "containers":
+				if containers, ok := msg.data.([]storage.Container); ok {
+					m.storageContainers = containers
+					m.storageContainersContent = storage.RenderStorageContainersView(m.currentStorageAccount, containers)
+				}
+			case "blobs":
+				if blobs, ok := msg.data.([]storage.Blob); ok {
+					m.storageBlobs = blobs
+					m.storageBlobsContent = storage.RenderStorageBlobsView(m.currentStorageAccount, m.currentContainer, blobs)
+				}
+			}
+		} else {
+			return m, func() tea.Msg {
+				return errorMsg{error: fmt.Sprintf("Storage operation failed: %v", msg.error)}
+			}
 		}
 
 	// Storage Account message handlers
@@ -3627,18 +3743,7 @@ func (m model) renderSubscriptionPopup(background string) string {
 }
 
 func (m model) renderResourcePanel(width, height int) string {
-	// Handle network-specific views first
 	switch m.activeView {
-	case "network-dashboard":
-		return m.networkDashboardContent
-	case "vnet-details":
-		return m.vnetDetailsContent
-	case "nsg-details":
-		return m.nsgDetailsContent
-	case "network-topology":
-		return m.networkTopologyContent
-	case "network-ai":
-		return m.networkAIContent
 	case "container-details":
 		return m.containerInstanceDetailsContent
 	case "container-logs":
