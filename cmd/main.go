@@ -1204,6 +1204,11 @@ func createNetworkResourceCmd(resourceType string) tea.Cmd {
 // showEnhancedDashboardCmd displays enhanced dashboard with progress
 func showEnhancedDashboardCmd(resourceID string) tea.Cmd {
 	return func() tea.Msg {
+		// Add safety check to prevent crashes
+		if resourceID == "" {
+			return errorMsg{error: "Cannot load dashboard: resource ID is empty"}
+		}
+
 		// Return initial progress message immediately
 		return dashboardLoadingProgressMsg{progress: resourcedetails.DashboardLoadingProgress{
 			CurrentOperation:       "Initializing resource dashboard...",
@@ -1242,14 +1247,23 @@ func startDashboardLoadingCmd(resourceID string) tea.Msg {
 // loadDashboardAsyncWithProgressCmd loads dashboard with streaming progress
 func loadDashboardAsyncWithProgressCmd(resourceID string) tea.Cmd {
 	return func() tea.Msg {
+		// Add safety check
+		if resourceID == "" {
+			return errorMsg{error: "Cannot load dashboard: resource ID is empty"}
+		}
+
 		// This will take time, so we'll simulate progress
 		// In a real implementation, this would stream progress updates
 		dashboardData, err := resourcedetails.GetComprehensiveDashboardDataWithProgress(resourceID, nil)
 
-		// Return final result
+		// Return final result with better error handling
 		var dashboardContent string
 		if err != nil && dashboardData == nil {
 			dashboardContent = fmt.Sprintf("Error loading dashboard: %v", err)
+			return dashboardDataLoadedMsg{data: nil, content: dashboardContent}
+		} else if dashboardData == nil {
+			dashboardContent = "Dashboard data is unavailable"
+			return dashboardDataLoadedMsg{data: nil, content: dashboardContent}
 		} else {
 			// Extract resource name from ID if possible, or use ID as fallback
 			resourceName := resourceID
@@ -2676,18 +2690,6 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selectedPanel = 1
 				// Don't reset scroll when switching to maintain position
 			}
-		case "d":
-			// Toggle dashboard view
-			m.showDashboard = !m.showDashboard
-			if m.showDashboard {
-				m.pushView("dashboard")
-			} else {
-				if m.selectedResource != nil {
-					m.pushView("details")
-				} else {
-					m.pushView("welcome")
-				}
-			}
 		case "j", "down":
 			if m.selectedPanel == 0 && m.treeView != nil {
 				// Try to navigate first
@@ -2819,9 +2821,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.actionInProgress = true
 				return m, executeResourceActionCmd("pods", *m.selectedResource)
 			}
-		case "D":
+		case "D", "shift+d":
 			// Enhanced dashboard with progress and real data (Shift+D)
 			if m.selectedResource != nil && !m.actionInProgress {
+				// Additional safety checks to prevent crashes
+				if m.selectedResource.ID == "" {
+					m.logEntries = append(m.logEntries, "ERROR: Cannot load dashboard - resource ID is empty")
+					return m, nil
+				}
 				m.actionInProgress = true
 				m.dashboardLoadingInProgress = true
 				m.dashboardLoadingStartTime = time.Now()
@@ -3039,10 +3046,18 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.exitSearchMode()
 			} else if m.showHelpPopup {
 				m.showHelpPopup = false
+				m.helpScrollOffset = 0 // Reset scroll when closing
 			} else {
 				// Try to go back to previous view
 				if !m.popView() {
-					// If no previous view, stay on current view - no action needed
+					// If no previous view, try to reset to welcome view
+					if m.activeView != "welcome" {
+						m.activeView = "welcome"
+						m.showDashboard = false
+						m.selectedResource = nil
+						m.rightPanelScrollOffset = 0
+						m.leftPanelScrollOffset = 0
+					}
 				}
 			}
 		}
@@ -3262,8 +3277,7 @@ func (m model) View() string {
 		allSections = append(allSections, renderShortcutRow("s", "Start resource (VMs, Containers)"))
 		allSections = append(allSections, renderShortcutRow("S", "Stop resource (VMs, Containers)"))
 		allSections = append(allSections, renderShortcutRow("r", "Restart resource (VMs, Containers)"))
-		allSections = append(allSections, renderShortcutRow("d", "Toggle dashboard view"))
-		allSections = append(allSections, renderShortcutRow("D", "Enhanced dashboard with real data"))
+		allSections = append(allSections, renderShortcutRow("Shift+D", "Enhanced dashboard with real data"))
 		allSections = append(allSections, renderShortcutRow("R", "Refresh all data"))
 		allSections = append(allSections, "")
 
@@ -4592,12 +4606,11 @@ func createShortcutsMap() map[string]string {
 		"↑/↓":    "Navigate search results (in search mode)",
 
 		// Resource Actions
-		"s": "Start resource (VMs, Containers)",
-		"S": "Stop resource (VMs, Containers)",
-		"r": "Restart resource (VMs, Containers)",
-		"d": "Toggle dashboard view",
-		"D": "Enhanced dashboard with real data",
-		"R": "Refresh all data",
+		"s":       "Start resource (VMs, Containers)",
+		"S":       "Stop resource (VMs, Containers)",
+		"r":       "Restart resource (VMs, Containers)",
+		"shift+d": "Enhanced dashboard with real data",
+		"R":       "Refresh all data",
 
 		// Network Management
 		"N":      "Network Dashboard",
