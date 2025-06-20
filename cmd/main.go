@@ -118,6 +118,21 @@ type networkTopologyLoadingProgressWithContinuationMsg struct {
 	finalError       error
 }
 
+// Dashboard loading progress message types
+type dashboardLoadingProgressMsg struct {
+	progress resourcedetails.DashboardLoadingProgress
+}
+type dashboardDataLoadedMsg struct {
+	data    *resourcedetails.ComprehensiveDashboardData
+	content string
+}
+type dashboardLoadingProgressWithContinuationMsg struct {
+	progress         resourcedetails.DashboardLoadingProgress
+	remainingUpdates []resourcedetails.DashboardLoadingProgress
+	finalData        *resourcedetails.ComprehensiveDashboardData
+	finalError       error
+}
+
 // Container Instance message types
 type containerInstanceDetailsMsg struct{ content string }
 type containerInstanceLogsMsg struct{ content string }
@@ -242,6 +257,11 @@ type model struct {
 	// Network topology loading progress tracking
 	topologyLoadingInProgress bool
 	topologyLoadingStartTime  time.Time
+
+	// Dashboard loading progress tracking
+	dashboardLoadingInProgress bool
+	dashboardLoadingStartTime  time.Time
+	dashboardData              *resourcedetails.ComprehensiveDashboardData
 
 	// Container Instance-specific content
 	containerInstanceDetailsContent string
@@ -1161,6 +1181,72 @@ func createNetworkResourceCmd(resourceType string) tea.Cmd {
 }
 
 // =============================================================================
+// RESOURCE DASHBOARD COMMANDS
+// =============================================================================
+
+// showEnhancedDashboardCmd displays enhanced dashboard with progress
+func showEnhancedDashboardCmd(resourceID string) tea.Cmd {
+	return func() tea.Msg {
+		// Return initial progress message immediately
+		return dashboardLoadingProgressMsg{progress: resourcedetails.DashboardLoadingProgress{
+			CurrentOperation:       "Initializing resource dashboard...",
+			TotalOperations:        5,
+			CompletedOperations:    0,
+			ProgressPercentage:     0.0,
+			DataProgress:           make(map[string]resourcedetails.DataProgress),
+			Errors:                 []string{},
+			StartTime:              time.Now(),
+			EstimatedTimeRemaining: "Calculating...",
+		}}
+	}
+}
+
+// loadDashboardWithProgressCmd loads the dashboard with real-time progress updates
+func loadDashboardWithProgressCmd(resourceID string) tea.Cmd {
+	return func() tea.Msg {
+		// Start async loading with real-time progress
+		return startDashboardLoadingCmd(resourceID)
+	}
+}
+
+// startDashboardLoadingCmd starts the async dashboard loading process
+func startDashboardLoadingCmd(resourceID string) tea.Msg {
+	// Create a command that will load the dashboard async and send progress updates
+	return tea.Batch(
+		// Start the actual loading process
+		loadDashboardAsyncWithProgressCmd(resourceID),
+		// Start a ticker for smooth progress animation
+		tea.Tick(time.Millisecond*500, func(t time.Time) tea.Msg {
+			return progressTickMsg{}
+		}),
+	)()
+}
+
+// loadDashboardAsyncWithProgressCmd loads dashboard with streaming progress
+func loadDashboardAsyncWithProgressCmd(resourceID string) tea.Cmd {
+	return func() tea.Msg {
+		// This will take time, so we'll simulate progress
+		// In a real implementation, this would stream progress updates
+		dashboardData, err := resourcedetails.GetComprehensiveDashboardDataWithProgress(resourceID, nil)
+
+		// Return final result
+		var dashboardContent string
+		if err != nil && dashboardData == nil {
+			dashboardContent = fmt.Sprintf("Error loading dashboard: %v", err)
+		} else {
+			// Extract resource name from ID if possible, or use ID as fallback
+			resourceName := resourceID
+			if parts := strings.Split(resourceID, "/"); len(parts) > 0 {
+				resourceName = parts[len(parts)-1]
+			}
+			dashboardContent = tui.RenderComprehensiveDashboard(resourceName, dashboardData)
+		}
+
+		return dashboardDataLoadedMsg{data: dashboardData, content: dashboardContent}
+	}
+}
+
+// =============================================================================
 // CONTAINER INSTANCE MANAGEMENT COMMANDS
 // =============================================================================
 
@@ -1487,7 +1573,7 @@ func (m model) getContextualShortcuts() string {
 		case "Microsoft.ContainerService/managedClusters":
 			shortcuts = append(shortcuts, []string{
 				"s:Start", "S:Stop", "p:Pods",
-				"D:Deployments", "n:Nodes", "v:Services",
+				"y:Deployments", "n:Nodes", "v:Services",
 			}...)
 
 		case "Microsoft.ContainerInstance/containerGroups":
@@ -1870,6 +1956,64 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
+		// Handle progress animation ticks during dashboard loading
+		if m.dashboardLoadingInProgress {
+			// Create simulated progress update
+			elapsed := time.Since(m.dashboardLoadingStartTime).Seconds()
+			estimatedTotal := 8.0 // Estimated total time in seconds for dashboard
+
+			// Calculate realistic progress based on elapsed time
+			simulatedProgress := (elapsed / estimatedTotal) * 95.0 // Cap at 95% until real completion
+			if simulatedProgress > 95.0 {
+				simulatedProgress = 95.0
+			}
+
+			simulatedCompletedOps := int(simulatedProgress / 100.0 * 5.0)
+
+			progress := resourcedetails.DashboardLoadingProgress{
+				CurrentOperation:       fmt.Sprintf("Loading dashboard data... (%.1fs elapsed)", elapsed),
+				TotalOperations:        5,
+				CompletedOperations:    simulatedCompletedOps,
+				ProgressPercentage:     simulatedProgress,
+				DataProgress:           make(map[string]resourcedetails.DataProgress),
+				Errors:                 []string{},
+				StartTime:              m.dashboardLoadingStartTime,
+				EstimatedTimeRemaining: fmt.Sprintf("%.1fs remaining", estimatedTotal-elapsed),
+			}
+
+			// Add dashboard-specific progress simulation
+			dashboardSteps := []string{"ResourceDetails", "Metrics", "UsageMetrics", "Alarms", "LogEntries"}
+			for i, stepType := range dashboardSteps {
+				var status string
+				if i < simulatedCompletedOps {
+					status = "completed"
+				} else if i == simulatedCompletedOps {
+					status = "loading"
+				} else {
+					status = "pending"
+				}
+
+				progress.DataProgress[stepType] = resourcedetails.DataProgress{
+					DataType:  stepType,
+					Status:    status,
+					StartTime: m.dashboardLoadingStartTime.Add(time.Duration(i) * time.Second * 2),
+					Count:     0,
+				}
+			}
+
+			// Render progress and continue if still loading
+			progressContent := tui.RenderDashboardLoadingProgress(progress)
+			// Store rendered progress content for dashboard view
+			_ = progressContent // Mark as used
+
+			// Continue ticking if still in progress
+			if m.dashboardLoadingInProgress {
+				return m, tea.Tick(time.Millisecond*500, func(t time.Time) tea.Msg {
+					return progressTickMsg{}
+				})
+			}
+		}
+
 	case networkLoadingProgressWithContinuationMsg:
 		// Handle progress updates with continuation
 		m.networkDashboardContent = network.RenderNetworkLoadingProgress(msg.progress)
@@ -1962,6 +2106,64 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.actionInProgress = false
 		m.nsgDetailsContent = msg.content
 		m.pushView("nsg-details")
+
+	// Dashboard loading progress message handlers
+	case dashboardLoadingProgressMsg:
+		// Handle dashboard loading progress updates
+		m.pushView("dashboard")
+
+		// If this is the initial progress message (0%), start the async loading
+		if msg.progress.ProgressPercentage == 0.0 && msg.progress.CompletedOperations == 0 {
+			m.dashboardLoadingInProgress = true
+			m.dashboardLoadingStartTime = time.Now()
+			// Store the resource ID for the dashboard
+			if m.selectedResource != nil {
+				return m, loadDashboardWithProgressCmd(m.selectedResource.ID)
+			}
+		}
+
+	case dashboardDataLoadedMsg:
+		// Final dashboard loaded - stop progress and show result
+		m.actionInProgress = false
+		m.dashboardLoadingInProgress = false
+		m.dashboardData = msg.data
+		m.pushView("dashboard")
+		// Add debug logging
+		m.logEntries = append(m.logEntries, "DEBUG: Enhanced Dashboard loaded successfully")
+
+	case dashboardLoadingProgressWithContinuationMsg:
+		// Handle dashboard progress updates with continuation
+		m.pushView("dashboard")
+
+		// If there are more progress updates, continue with the next one
+		if len(msg.remainingUpdates) > 0 {
+			// Add a small delay to make progress visible
+			return m, tea.Tick(time.Millisecond*200, func(t time.Time) tea.Msg {
+				return dashboardLoadingProgressWithContinuationMsg{
+					progress:         msg.remainingUpdates[0],
+					remainingUpdates: msg.remainingUpdates[1:],
+					finalData:        msg.finalData,
+					finalError:       msg.finalError,
+				}
+			})
+		}
+
+		// No more progress updates, show final result
+		var dashboardContent string
+		if msg.finalError != nil && msg.finalData == nil {
+			dashboardContent = fmt.Sprintf("Error loading dashboard: %v", msg.finalError)
+		} else if m.selectedResource != nil {
+			dashboardContent = tui.RenderComprehensiveDashboard(m.selectedResource.Name, msg.finalData)
+		} else {
+			dashboardContent = "No resource selected"
+		}
+
+		// Set final content and transition to dashboard view
+		m.actionInProgress = false
+		m.dashboardData = msg.finalData
+		// Store the rendered content if needed for the view
+		_ = dashboardContent // Use the content (mark as used)
+		return m, nil
 
 	case networkAIAnalysisMsg:
 		m.actionInProgress = false
@@ -2502,9 +2704,14 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, executeResourceActionCmd("pods", *m.selectedResource)
 			}
 		case "D":
-			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.ContainerService/managedClusters" {
+			// Enhanced dashboard with progress and real data (Shift+D)
+			if m.selectedResource != nil && !m.actionInProgress {
 				m.actionInProgress = true
-				return m, executeResourceActionCmd("deployments", *m.selectedResource)
+				m.dashboardLoadingInProgress = true
+				m.dashboardLoadingStartTime = time.Now()
+				m.dashboardData = nil // Clear any existing data
+				m.pushView("dashboard")
+				return m, showEnhancedDashboardCmd(m.selectedResource.ID)
 			}
 		case "n":
 			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.ContainerService/managedClusters" {
@@ -2515,6 +2722,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.ContainerService/managedClusters" {
 				m.actionInProgress = true
 				return m, executeResourceActionCmd("services", *m.selectedResource)
+			}
+		case "y":
+			// AKS deployments (moved from 'D' to avoid conflict with enhanced dashboard)
+			if m.selectedResource != nil && !m.actionInProgress && m.selectedResource.Type == "Microsoft.ContainerService/managedClusters" {
+				m.actionInProgress = true
+				return m, executeResourceActionCmd("deployments", *m.selectedResource)
 			}
 		case "N":
 			// Show comprehensive network dashboard
@@ -2934,6 +3147,7 @@ func (m model) View() string {
 		allSections = append(allSections, renderShortcutRow("S", "Stop resource (VMs, Containers)"))
 		allSections = append(allSections, renderShortcutRow("r", "Restart resource (VMs, Containers)"))
 		allSections = append(allSections, renderShortcutRow("d", "Toggle dashboard view"))
+		allSections = append(allSections, renderShortcutRow("D", "Enhanced dashboard with real data"))
 		allSections = append(allSections, renderShortcutRow("R", "Refresh all data"))
 		allSections = append(allSections, "")
 
@@ -2975,7 +3189,7 @@ func (m model) View() string {
 		allSections = append(allSections, renderShortcutRow("c", "SSH Connect (VMs)"))
 		allSections = append(allSections, renderShortcutRow("b", "Bastion Connect (VMs)"))
 		allSections = append(allSections, renderShortcutRow("p", "List Pods (AKS)"))
-		allSections = append(allSections, renderShortcutRow("D", "List Deployments (AKS)"))
+		allSections = append(allSections, renderShortcutRow("y", "List Deployments (AKS)"))
 		allSections = append(allSections, renderShortcutRow("n", "List Nodes (AKS)"))
 		allSections = append(allSections, renderShortcutRow("v", "List Services (AKS)"))
 		allSections = append(allSections, "")
@@ -3446,6 +3660,28 @@ func (m model) renderResourcePanel(width, height int) string {
 		return m.renderWelcomePanel(width, height)
 	}
 
+	// Check if enhanced dashboard loading is in progress
+	if m.dashboardLoadingInProgress && m.activeView == "dashboard" {
+		// Show dashboard loading progress
+		progress := resourcedetails.DashboardLoadingProgress{
+			CurrentOperation:       "Loading comprehensive dashboard...",
+			TotalOperations:        5,
+			CompletedOperations:    0,
+			ProgressPercentage:     0.0,
+			DataProgress:           make(map[string]resourcedetails.DataProgress),
+			Errors:                 []string{},
+			StartTime:              m.dashboardLoadingStartTime,
+			EstimatedTimeRemaining: "Calculating...",
+		}
+		return tui.RenderDashboardLoadingProgress(progress)
+	}
+
+	// Check if enhanced dashboard data is loaded
+	if m.dashboardData != nil && m.activeView == "dashboard" {
+		return tui.RenderComprehensiveDashboard(m.selectedResource.Name, m.dashboardData)
+	}
+
+	// Original dashboard view
 	if m.showDashboard {
 		return m.renderDashboardView(width, height)
 	}
@@ -4255,6 +4491,7 @@ func createShortcutsMap() map[string]string {
 		"S": "Stop resource (VMs, Containers)",
 		"r": "Restart resource (VMs, Containers)",
 		"d": "Toggle dashboard view",
+		"D": "Enhanced dashboard with real data",
 		"R": "Refresh all data",
 
 		// Network Management
@@ -4280,7 +4517,7 @@ func createShortcutsMap() map[string]string {
 		"c": "SSH Connect (VMs)",
 		"b": "Bastion Connect (VMs)",
 		"p": "List Pods (AKS)",
-		"D": "List Deployments (AKS)",
+		"y": "List Deployments (AKS)",
 		"n": "List Nodes (AKS)",
 		"v": "List Services (AKS)",
 
