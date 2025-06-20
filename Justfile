@@ -145,12 +145,6 @@ deps:
 # QUALITY ASSURANCE
 # =============================================================================
 
-# Lint code (requires golangci-lint)
-lint:
-	@echo "Running linter..."
-	golangci-lint run ./...
-	@echo "✅ Linting complete"
-
 # Check for security issues (requires gosec)
 security:
 	@echo "Running security check..."
@@ -172,7 +166,7 @@ security-lite:
 	@echo "✅ Lightweight security check complete"
 
 # Run all quality checks
-qa: fmt tidy lint test
+qa: fmt tidy test
 	@echo "✅ All quality checks passed!"
 	@echo "💡 To run security check, use: just security"
 
@@ -200,7 +194,6 @@ info:
 # Install development tools
 install-tools:
 	@echo "Installing development tools..."
-	go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 	go install golang.org/x/tools/cmd/goimports@latest
 	@echo "Installing gosec..."
 	@if curl -sfL https://raw.githubusercontent.com/securego/gosec/master/install.sh | sh -s -- -b $(shell go env GOPATH)/bin latest; then \

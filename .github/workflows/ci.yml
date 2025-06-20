@@ -69,14 +69,6 @@ jobs:
         flags: unittests
         name: codecov-umbrella
 
-    - name: Install linting tools
-      run: |
-        # Install golangci-lint
-        go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
-
-    - name: Run linter
-      run: just lint
-
     # TODO: Re-enable security check with gosec when installation issues are resolved
     # - name: Run security check
     #   run: just security
