@@ -223,7 +223,8 @@ type model struct {
 	currentContainer          string
 
 	// Help popup state
-	showHelpPopup bool
+	showHelpPopup    bool
+	helpScrollOffset int // For scrolling through help content
 
 	// Navigation stack for back navigation
 	navigationStack []string
@@ -1469,6 +1470,7 @@ func initModel() model {
 		propertyExpandedIndex:  -1,
 		expandedProperties:     make(map[string]bool),
 		showHelpPopup:          false,
+		helpScrollOffset:       0,
 		navigationStack:        []string{}, // Initialize navigation stack
 		// Initialize search functionality
 		searchEngine:      search.NewSearchEngine(),
@@ -1823,6 +1825,24 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.settingsMenuIndex = (m.settingsMenuIndex - 1 + len(settingsMenuOptions)) % len(settingsMenuOptions)
 				} else if m.settingsMode == "folder-browser" {
 					m.settingsMenuIndex = (m.settingsMenuIndex - 1 + len(m.settingsFolders)) % len(m.settingsFolders)
+				}
+			}
+			return m, nil
+		}
+
+		// Handle Help popup navigation
+		if m.showHelpPopup {
+			switch msg.String() {
+			case "escape", "?":
+				m.showHelpPopup = false
+				m.helpScrollOffset = 0 // Reset scroll when closing
+			case "j", "down":
+				// Scroll down in help content
+				m.helpScrollOffset += 1
+			case "k", "up":
+				// Scroll up in help content (prevent negative scroll)
+				if m.helpScrollOffset > 0 {
+					m.helpScrollOffset -= 1
 				}
 			}
 			return m, nil
@@ -2451,97 +2471,128 @@ func (m model) View() string {
 
 	// Render help popup if active
 	if m.showHelpPopup {
-		// Create a comprehensive help content
+		// Create a comprehensive help content with better table formatting
 		var helpContent strings.Builder
 		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render("⌨️  Azure TUI - Keyboard Shortcuts"))
 		helpContent.WriteString("\n\n")
 
-		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("🧭 Navigation:"))
-		helpContent.WriteString("\n")
-		helpContent.WriteString("j/k ↑/↓    Navigate up/down in tree\n")
-		helpContent.WriteString("h/l ←/→    Switch between panels\n")
-		helpContent.WriteString("Space      Expand/collapse resource groups\n")
-		helpContent.WriteString("Enter      Open resource in details panel\n")
-		helpContent.WriteString("Tab        Switch between panels\n")
-		helpContent.WriteString("e          Expand/collapse complex properties\n")
-		helpContent.WriteString("Ctrl+j/k   Scroll up/down in current panel\n\n")
+		// Create structured table data for better formatting
+		var allSections []string
 
-		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorYellow).Render("🔍 Search:"))
-		helpContent.WriteString("\n")
-		helpContent.WriteString("/          Enter search mode\n")
-		helpContent.WriteString("Enter      Execute search / Accept suggestion\n")
-		helpContent.WriteString("Tab        Accept first suggestion\n")
-		helpContent.WriteString("↑/↓        Navigate search results\n")
-		helpContent.WriteString("Escape     Exit search mode\n")
-		helpContent.WriteString("Advanced:  type:vm location:eastus tag:env=prod\n\n")
+		// Navigation section
+		allSections = append(allSections, lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("🧭 Navigation:"))
+		allSections = append(allSections, "")
+		allSections = append(allSections, renderShortcutRow("j/k ↑/↓", "Navigate up/down in tree"))
+		allSections = append(allSections, renderShortcutRow("h/l ←/→", "Switch between panels"))
+		allSections = append(allSections, renderShortcutRow("Space", "Expand/collapse resource groups"))
+		allSections = append(allSections, renderShortcutRow("Enter", "Open resource in details panel"))
+		allSections = append(allSections, renderShortcutRow("Tab", "Switch between panels"))
+		allSections = append(allSections, renderShortcutRow("e", "Expand/collapse complex properties"))
+		allSections = append(allSections, renderShortcutRow("Ctrl+j/k", "Scroll up/down in current panel"))
+		allSections = append(allSections, "")
 
-		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorAqua).Render("⚡ Resource Actions:"))
-		helpContent.WriteString("\n")
-		helpContent.WriteString("s          Start resource (VMs, Containers)\n")
-		helpContent.WriteString("S          Stop resource (VMs, Containers)\n")
-		helpContent.WriteString("r          Restart resource (VMs, Containers)\n")
-		helpContent.WriteString("d          Toggle dashboard view\n")
-		helpContent.WriteString("R          Refresh all data\n\n")
+		// Search section
+		allSections = append(allSections, lipgloss.NewStyle().Bold(true).Foreground(colorYellow).Render("🔍 Search:"))
+		allSections = append(allSections, "")
+		allSections = append(allSections, renderShortcutRow("/", "Enter search mode"))
+		allSections = append(allSections, renderShortcutRow("Enter", "Execute search / Accept suggestion"))
+		allSections = append(allSections, renderShortcutRow("Tab", "Accept first suggestion"))
+		allSections = append(allSections, renderShortcutRow("↑/↓", "Navigate search results"))
+		allSections = append(allSections, renderShortcutRow("Escape", "Exit search mode"))
+		allSections = append(allSections, renderShortcutRow("Advanced", "type:vm location:eastus tag:env=prod"))
+		allSections = append(allSections, "")
 
-		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render("🌐 Network Management:"))
-		helpContent.WriteString("\n")
-		helpContent.WriteString("N          Network Dashboard\n")
-		helpContent.WriteString("V          VNet Details (for VNets)\n")
-		helpContent.WriteString("G          NSG Details (for NSGs)\n")
-		helpContent.WriteString("Z          Network Topology\n")
-		helpContent.WriteString("A          AI Network Analysis\n")
-		helpContent.WriteString("C          Create VNet\n")
-		helpContent.WriteString("Ctrl+N     Create NSG\n\n")
+		// Resource Actions section
+		allSections = append(allSections, lipgloss.NewStyle().Bold(true).Foreground(colorAqua).Render("⚡ Resource Actions:"))
+		allSections = append(allSections, "")
+		allSections = append(allSections, renderShortcutRow("s", "Start resource (VMs, Containers)"))
+		allSections = append(allSections, renderShortcutRow("S", "Stop resource (VMs, Containers)"))
+		allSections = append(allSections, renderShortcutRow("r", "Restart resource (VMs, Containers)"))
+		allSections = append(allSections, renderShortcutRow("d", "Toggle dashboard view"))
+		allSections = append(allSections, renderShortcutRow("R", "Refresh all data"))
+		allSections = append(allSections, "")
 
-		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorAqua).Render("🏗️  Terraform Management:"))
-		helpContent.WriteString("\n")
-		helpContent.WriteString("Ctrl+T     Open Terraform Manager\n")
-		helpContent.WriteString("           - Browse Terraform projects\n")
-		helpContent.WriteString("           - Analyze code\n")
-		helpContent.WriteString("           - Execute operations\n")
-		helpContent.WriteString("           - Create from templates\n\n")
+		// Network Management section
+		allSections = append(allSections, lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render("🌐 Network Management:"))
+		allSections = append(allSections, "")
+		allSections = append(allSections, renderShortcutRow("N", "Network Dashboard"))
+		allSections = append(allSections, renderShortcutRow("V", "VNet Details (for VNets)"))
+		allSections = append(allSections, renderShortcutRow("G", "NSG Details (for NSGs)"))
+		allSections = append(allSections, renderShortcutRow("Z", "Network Topology"))
+		allSections = append(allSections, renderShortcutRow("A", "AI Network Analysis"))
+		allSections = append(allSections, renderShortcutRow("C", "Create VNet"))
+		allSections = append(allSections, renderShortcutRow("Ctrl+N", "Create NSG"))
+		allSections = append(allSections, "")
 
-		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorPurple).Render("🐳 Container Management:"))
-		helpContent.WriteString("\n")
-		helpContent.WriteString("L          Get Container Logs\n")
-		helpContent.WriteString("E          Exec into Container\n")
-		helpContent.WriteString("a          Attach to Container\n")
-		helpContent.WriteString("u          Scale Container Resources\n")
-		helpContent.WriteString("I          Container Instance Details\n\n")
+		// Terraform Management section
+		allSections = append(allSections, lipgloss.NewStyle().Bold(true).Foreground(colorAqua).Render("🏗️  Terraform Management:"))
+		allSections = append(allSections, "")
+		allSections = append(allSections, renderShortcutRow("Ctrl+T", "Open Terraform Manager"))
+		allSections = append(allSections, renderShortcutRow("", "• Browse Terraform projects"))
+		allSections = append(allSections, renderShortcutRow("", "• Analyze code"))
+		allSections = append(allSections, renderShortcutRow("", "• Execute operations"))
+		allSections = append(allSections, renderShortcutRow("", "• Create from templates"))
+		allSections = append(allSections, "")
 
-		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorYellow).Render("🔐 SSH & AKS:"))
-		helpContent.WriteString("\n")
-		helpContent.WriteString("c          SSH Connect (VMs)\n")
-		helpContent.WriteString("b          Bastion Connect (VMs)\n")
-		helpContent.WriteString("p          List Pods (AKS)\n")
-		helpContent.WriteString("D          List Deployments (AKS)\n")
-		helpContent.WriteString("n          List Nodes (AKS)\n")
-		helpContent.WriteString("v          List Services (AKS)\n\n")
+		// Container Management section
+		allSections = append(allSections, lipgloss.NewStyle().Bold(true).Foreground(colorPurple).Render("🐳 Container Management:"))
+		allSections = append(allSections, "")
+		allSections = append(allSections, renderShortcutRow("L", "Get Container Logs"))
+		allSections = append(allSections, renderShortcutRow("E", "Exec into Container"))
+		allSections = append(allSections, renderShortcutRow("a", "Attach to Container"))
+		allSections = append(allSections, renderShortcutRow("u", "Scale Container Resources"))
+		allSections = append(allSections, renderShortcutRow("I", "Container Instance Details"))
+		allSections = append(allSections, "")
 
-		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGray).Render("🔑 Key Vault Management:"))
-		helpContent.WriteString("\n")
-		helpContent.WriteString("K          List Secrets\n")
-		helpContent.WriteString("Shift+K    Create Secret\n")
-		helpContent.WriteString("Ctrl+D     Delete Secret\n\n")
+		// SSH & AKS section
+		allSections = append(allSections, lipgloss.NewStyle().Bold(true).Foreground(colorYellow).Render("🔐 SSH & AKS:"))
+		allSections = append(allSections, "")
+		allSections = append(allSections, renderShortcutRow("c", "SSH Connect (VMs)"))
+		allSections = append(allSections, renderShortcutRow("b", "Bastion Connect (VMs)"))
+		allSections = append(allSections, renderShortcutRow("p", "List Pods (AKS)"))
+		allSections = append(allSections, renderShortcutRow("D", "List Deployments (AKS)"))
+		allSections = append(allSections, renderShortcutRow("n", "List Nodes (AKS)"))
+		allSections = append(allSections, renderShortcutRow("v", "List Services (AKS)"))
+		allSections = append(allSections, "")
 
-		helpContent.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGray).Render("🎮 Interface:"))
-		helpContent.WriteString("\n")
-		helpContent.WriteString("?          Show/hide this help\n")
-		helpContent.WriteString("Ctrl+,     Open Settings Manager\n")
-		helpContent.WriteString("Esc        Navigate back / Close dialogs\n")
-		helpContent.WriteString("q          Quit application\n\n")
+		// Key Vault Management section
+		allSections = append(allSections, lipgloss.NewStyle().Bold(true).Foreground(colorGray).Render("🔑 Key Vault Management:"))
+		allSections = append(allSections, "")
+		allSections = append(allSections, renderShortcutRow("K", "List Secrets"))
+		allSections = append(allSections, renderShortcutRow("Shift+K", "Create Secret"))
+		allSections = append(allSections, renderShortcutRow("Ctrl+D", "Delete Secret"))
+		allSections = append(allSections, "")
 
-		helpContent.WriteString(lipgloss.NewStyle().Italic(true).Foreground(colorGray).Render("Press '?' or 'Esc' to close this help"))
+		// Interface section
+		allSections = append(allSections, lipgloss.NewStyle().Bold(true).Foreground(colorGray).Render("🎮 Interface:"))
+		allSections = append(allSections, "")
+		allSections = append(allSections, renderShortcutRow("?", "Show/hide this help"))
+		allSections = append(allSections, renderShortcutRow("Ctrl+,", "Open Settings Manager"))
+		allSections = append(allSections, renderShortcutRow("Esc", "Navigate back / Close dialogs"))
+		allSections = append(allSections, renderShortcutRow("q", "Quit application"))
+		allSections = append(allSections, "")
 
-		// Create popup style
+		// Add scroll navigation instructions
+		allSections = append(allSections, lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("📜 Help Navigation:"))
+		allSections = append(allSections, "")
+		allSections = append(allSections, renderShortcutRow("j/k ↑/↓", "Scroll help content"))
+		allSections = append(allSections, renderShortcutRow("? / Esc", "Close this help"))
+
+		// Join all sections
+		fullHelpContent := strings.Join(allSections, "\n")
+
+		// Apply scrolling to help content
+		visibleLines := 20 // Number of lines visible in the popup
+		scrolledContent := m.renderScrollableContentWithOffset(fullHelpContent, visibleLines, m.helpScrollOffset)
+
+		helpContent.WriteString(scrolledContent)
+
+		// Create popup style without frames or background
 		popupStyle := lipgloss.NewStyle().
-			Background(bgMedium).
 			Foreground(fgLight).
-			Border(lipgloss.RoundedBorder()).
-			BorderForeground(colorBlue).
 			Padding(1, 2).
-			Width(70).
-			Align(lipgloss.Center, lipgloss.Top)
+			Width(78). // Slightly wider for better table formatting
+			Align(lipgloss.Left, lipgloss.Top)
 
 		styledPopup := popupStyle.Render(helpContent.String())
 
@@ -3599,6 +3650,24 @@ func formatValue(value interface{}) string {
 		}
 		return str
 	}
+}
+
+// renderShortcutRow formats a keyboard shortcut row with proper alignment
+func renderShortcutRow(shortcut, description string) string {
+	if shortcut == "" {
+		// For sub-items or descriptions without shortcuts
+		return fmt.Sprintf("           %s", description)
+	}
+
+	// Format with proper padding for alignment
+	shortcutStyle := lipgloss.NewStyle().Foreground(colorAqua).Bold(true)
+	descStyle := lipgloss.NewStyle().Foreground(fgLight)
+
+	// Ensure consistent spacing: shortcut gets 12 characters, description follows
+	paddedShortcut := fmt.Sprintf("%-12s", shortcut)
+	return fmt.Sprintf("%s %s",
+		shortcutStyle.Render(paddedShortcut),
+		descStyle.Render(description))
 }
 
 // max returns the maximum of two integers

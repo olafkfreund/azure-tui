@@ -17,39 +17,39 @@ import (
 // Additional rendering methods for TerraformTUI
 
 func (m *TerraformTUI) renderTemplatesView() string {
+	// Clean, frameless styling for consistency
 	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#874BFD")).
+		Foreground(lipgloss.Color("#FAFAFA")).
 		Padding(1, 2)
 
 	if m.activeView == ViewTemplates {
-		style = style.BorderForeground(lipgloss.Color("#FF5F87"))
+		style = style.Foreground(lipgloss.Color("#FF5F87"))
 	}
 
 	return style.Render(m.templates.View())
 }
 
 func (m *TerraformTUI) renderWorkspacesView() string {
+	// Clean, frameless styling for consistency
 	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#874BFD")).
+		Foreground(lipgloss.Color("#FAFAFA")).
 		Padding(1, 2)
 
 	if m.activeView == ViewWorkspaces {
-		style = style.BorderForeground(lipgloss.Color("#FF5F87"))
+		style = style.Foreground(lipgloss.Color("#FF5F87"))
 	}
 
 	return style.Render(m.workspaces.View())
 }
 
 func (m *TerraformTUI) renderEditorView() string {
+	// Clean, frameless styling for consistency
 	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#874BFD")).
+		Foreground(lipgloss.Color("#FAFAFA")).
 		Padding(1, 2)
 
 	if m.activeView == ViewEditor {
-		style = style.BorderForeground(lipgloss.Color("#FF5F87"))
+		style = style.Foreground(lipgloss.Color("#FF5F87"))
 	}
 
 	title := fmt.Sprintf("Editor - %s", m.currentFile)
@@ -68,13 +68,13 @@ func (m *TerraformTUI) renderEditorView() string {
 }
 
 func (m *TerraformTUI) renderOperationsView() string {
+	// Clean, frameless styling for consistency
 	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#874BFD")).
+		Foreground(lipgloss.Color("#FAFAFA")).
 		Padding(1, 2)
 
 	if m.activeView == ViewOperations {
-		style = style.BorderForeground(lipgloss.Color("#FF5F87"))
+		style = style.Foreground(lipgloss.Color("#FF5F87"))
 	}
 
 	var operations []string
@@ -113,13 +113,13 @@ func (m *TerraformTUI) renderOperationsView() string {
 }
 
 func (m *TerraformTUI) renderStateView() string {
+	// Clean, frameless styling for consistency
 	style := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#874BFD")).
+		Foreground(lipgloss.Color("#FAFAFA")).
 		Padding(1, 2)
 
 	if m.activeView == ViewState {
-		style = style.BorderForeground(lipgloss.Color("#FF5F87"))
+		style = style.Foreground(lipgloss.Color("#FF5F87"))
 	}
 
 	var stateInfo []string

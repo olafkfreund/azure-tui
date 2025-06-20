@@ -783,7 +783,7 @@ func RenderResourceActions(resourceType, resourceName string, actions []string) 
 func RenderEditDialog(resourceName, resourceType string, currentConfig map[string]string) string {
 	var content strings.Builder
 
-	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Background(lipgloss.Color("236")).Padding(0, 2)
+	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Padding(0, 2)
 	content.WriteString(headerStyle.Render(fmt.Sprintf("✏️ Edit: %s", resourceName)))
 	content.WriteString("\n\n")
 

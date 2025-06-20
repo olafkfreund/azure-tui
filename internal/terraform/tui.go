@@ -395,9 +395,9 @@ func (m *TerraformTUI) renderFooter() string {
 func (m *TerraformTUI) renderWithPopup() string {
 	// base := m.View()
 
+	// Clean, frameless popup style for consistency with main help popup
 	popup := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("#874BFD")).
+		Foreground(lipgloss.Color("#FAFAFA")).
 		Padding(1, 2).
 		Width(60).
 		Height(20).

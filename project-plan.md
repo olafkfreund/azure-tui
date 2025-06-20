@@ -50,6 +50,7 @@ A comprehensive Go-based Terminal User Interface for Azure resource management f
 - ✅ **Panel Visual Indicators**: Colored borders (Blue for Tree, Green for Details)
 - ✅ **Property Expansion System**: `e` key to expand/collapse complex properties
 - ✅ **Context-Sensitive Navigation**: Smart j/k behavior based on active panel
+- ✅ **Clean Popup Design**: Frameless, minimal popup styling for professional appearance
 
 ### 🤖 **AI-Powered Features**
 - ✅ **Resource Analysis** (`a`): Comprehensive AI insights and recommendations
@@ -63,7 +64,7 @@ A comprehensive Go-based Terminal User Interface for Azure resource management f
 - ✅ **Resource Editor** (`E`): Safe configuration editing with validation
 - ✅ **Delete Confirmation** (`Ctrl+D`): Protected resource deletion with warnings
 - ✅ **Resource Actions Menu**: Context-aware action suggestions
-- ✅ **Keyboard Shortcuts** (`?`): Complete shortcut reference popup
+- ✅ **Keyboard Shortcuts** (`?`): Complete shortcut reference popup with scrollable, frameless design
 
 ### 🔧 **Technical Excellence**
 - ✅ **Modern Styling**: Lipgloss-based consistent UI throughout
