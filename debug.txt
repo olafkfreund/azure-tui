@@ -1,0 +1,243 @@
+[DEBUG] Starting Azure TUI application
+[DEBUG] Init command starting
+[DEBUG] loadDataInitMsg received, starting data load
+[DEBUG] VM status for dem01: VM running
+[DEBUG] Loading resource details for: dem01groupdiag (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Storage/storageAccounts/dem01groupdiag)
+[DEBUG] Loading resource details for: dem01-nsg (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkSecurityGroups/dem01-nsg)
+[DEBUG] Loading resource details for: dem01-ip (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/publicIPAddresses/dem01-ip)
+[DEBUG] Loading resource details for: dem01-vnet (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/virtualNetworks/dem01-vnet)
+[DEBUG] Successfully loaded resource details for: dem01groupdiag
+[DEBUG] Resource details loaded for: dem01groupdiag
+[DEBUG] Successfully loaded resource details for: dem01-ip
+[DEBUG] Resource details loaded for: dem01-ip
+[DEBUG] Successfully loaded resource details for: dem01-nsg
+[DEBUG] Resource details loaded for: dem01-nsg
+[DEBUG] Successfully loaded resource details for: dem01-vnet
+[DEBUG] Resource details loaded for: dem01-vnet
+[DEBUG] Loading resource details for: RecommendedAlertRules-AG-1 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/microsoft.insights/actiongroups/RecommendedAlertRules-AG-1)
+[DEBUG] Loading resource details for: dem01211_z1 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkInterfaces/dem01211_z1)
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Loading resource details for selected node: dem01
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Successfully loaded resource details for: RecommendedAlertRules-AG-1
+[DEBUG] Resource details loaded for: RecommendedAlertRules-AG-1
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Successfully loaded resource details for: dem01211_z1
+[DEBUG] Resource details loaded for: dem01211_z1
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Metrics timeout for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01 after 5s
+[DEBUG] Fallback to demo metrics for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01
+[DEBUG] LogEntries timeout for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01 after 5s
+[DEBUG] Fallback to demo log entries for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01
+[DEBUG] DashboardData: errors=[Metrics: timeout after 5s Log entries: timeout after 5s], metrics=&{/subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01 75.2 68.5 12.3 8.7 45.2 23.1 2025-06-20 20:08:51.515881825 +0100 BST m=+49.124023755 map[]}, usage=[{Percentage CPU N/A N/A}], alarms=[{Percentage CPU - dem01 OK Severity: 3, Window: PT5M} {OS Disk IOPS Consumed Percentage - dem01 OK Severity: 3, Window: PT5M} {Available Memory Bytes - dem01 OK Severity: 3, Window: PT5M} {VM Availability - dem01 OK Severity: 3, Window: PT5M} {Network Out Total - dem01 OK Severity: 3, Window: PT5M} {Network In Total - dem01 OK Severity: 3, Window: PT5M} {Data Disk IOPS Consumed Percentage - dem01 OK Severity: 3, Window: PT5M} {CPU Usage Percentage - demo_aks01 OK Severity: 3, Window: PT5M} {Memory Working Set Percentage - demo_aks01 OK Severity: 3, Window: PT5M}], logs=[{2025-06-20 18:09:02.170550898 +0100 BST m=-7140.221307182 INFO AzureActivity Resource health check completed Health green /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01} {2025-06-20 16:09:02.170550898 +0100 BST m=-14340.221307182 WARN AzureMonitor High CPU usage detected Performance yellow /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01} {2025-06-20 14:09:02.170550898 +0100 BST m=-21540.221307182 INFO AzureActivity Backup operation completed successfully Backup green /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01} {2025-06-20 12:09:02.170550898 +0100 BST m=-28740.221307182 ERROR AzureActivity Network connectivity issue detected Network red /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01} {2025-06-20 10:09:02.170550898 +0100 BST m=-35940.221307182 INFO AzureMonitor Auto-scaling event triggered Scaling green /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01}]
+[DEBUG] Starting Azure TUI application
+[DEBUG] Init command starting
+[DEBUG] loadDataInitMsg received, starting data load
+[DEBUG] VM status for dem01: VM running
+[DEBUG] Loading resource details for: dem01groupdiag (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Storage/storageAccounts/dem01groupdiag)
+[DEBUG] Loading resource details for: dem01-nsg (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkSecurityGroups/dem01-nsg)
+[DEBUG] Loading resource details for: dem01-ip (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/publicIPAddresses/dem01-ip)
+[DEBUG] Loading resource details for: dem01-vnet (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/virtualNetworks/dem01-vnet)
+[DEBUG] Loading resource details for: RecommendedAlertRules-AG-1 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/microsoft.insights/actiongroups/RecommendedAlertRules-AG-1)
+[DEBUG] Loading resource details for: dem01211_z1 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkInterfaces/dem01211_z1)
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Loading resource details for selected node: dem01
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Successfully loaded resource details for: dem01groupdiag
+[DEBUG] Resource details loaded for: dem01groupdiag
+[DEBUG] Successfully loaded resource details for: RecommendedAlertRules-AG-1
+[DEBUG] Resource details loaded for: RecommendedAlertRules-AG-1
+[DEBUG] Successfully loaded resource details for: dem01-ip
+[DEBUG] Resource details loaded for: dem01-ip
+[DEBUG] Successfully loaded resource details for: dem01-nsg
+[DEBUG] Resource details loaded for: dem01-nsg
+[DEBUG] Successfully loaded resource details for: dem01-vnet
+[DEBUG] Resource details loaded for: dem01-vnet
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Successfully loaded resource details for: dem01211_z1
+[DEBUG] Resource details loaded for: dem01211_z1
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Loading resource details for: dem01211_z1 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkInterfaces/dem01211_z1)
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Loading resource details for selected node: dem01
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Successfully loaded resource details for: dem01211_z1
+[DEBUG] Resource details loaded for: dem01211_z1
+[DEBUG] Metrics timeout for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01 after 5s
+[DEBUG] Fallback to demo metrics for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01
+[DEBUG] LogEntries timeout for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01 after 5s
+[DEBUG] Fallback to demo log entries for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01
+[DEBUG] DashboardData: errors=[Metrics: timeout after 5s Log entries: timeout after 5s], metrics=&{/subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01 75.2 68.5 12.3 8.7 45.2 23.1 2025-06-20 20:11:57.435830104 +0100 BST m=+35.797879359 map[]}, usage=[{Percentage CPU N/A N/A}], alarms=[{Percentage CPU - dem01 OK Severity: 3, Window: PT5M} {OS Disk IOPS Consumed Percentage - dem01 OK Severity: 3, Window: PT5M} {Available Memory Bytes - dem01 OK Severity: 3, Window: PT5M} {VM Availability - dem01 OK Severity: 3, Window: PT5M} {Network Out Total - dem01 OK Severity: 3, Window: PT5M} {Network In Total - dem01 OK Severity: 3, Window: PT5M} {Data Disk IOPS Consumed Percentage - dem01 OK Severity: 3, Window: PT5M} {CPU Usage Percentage - demo_aks01 OK Severity: 3, Window: PT5M} {Memory Working Set Percentage - demo_aks01 OK Severity: 3, Window: PT5M}], logs=[{2025-06-20 18:12:08.137833812 +0100 BST m=-7153.500116933 INFO AzureActivity Resource health check completed Health green /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01} {2025-06-20 16:12:08.137833812 +0100 BST m=-14353.500116933 WARN AzureMonitor High CPU usage detected Performance yellow /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01} {2025-06-20 14:12:08.137833812 +0100 BST m=-21553.500116933 INFO AzureActivity Backup operation completed successfully Backup green /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01} {2025-06-20 12:12:08.137833812 +0100 BST m=-28753.500116933 ERROR AzureActivity Network connectivity issue detected Network red /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01} {2025-06-20 10:12:08.137833812 +0100 BST m=-35953.500116933 INFO AzureMonitor Auto-scaling event triggered Scaling green /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01}]
+[DEBUG] Starting Azure TUI application
+[DEBUG] Init command starting
+[DEBUG] loadDataInitMsg received, starting data load
+[DEBUG] VM status for dem01: VM running
+[DEBUG] Loading resource details for: dem01groupdiag (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Storage/storageAccounts/dem01groupdiag)
+[DEBUG] Loading resource details for: dem01-nsg (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkSecurityGroups/dem01-nsg)
+[DEBUG] Loading resource details for: dem01-ip (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/publicIPAddresses/dem01-ip)
+[DEBUG] Loading resource details for: dem01-vnet (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/virtualNetworks/dem01-vnet)
+[DEBUG] Loading resource details for: RecommendedAlertRules-AG-1 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/microsoft.insights/actiongroups/RecommendedAlertRules-AG-1)
+[DEBUG] Loading resource details for: dem01211_z1 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkInterfaces/dem01211_z1)
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Loading resource details for selected node: dem01
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Successfully loaded resource details for: dem01groupdiag
+[DEBUG] Resource details loaded for: dem01groupdiag
+[DEBUG] Successfully loaded resource details for: RecommendedAlertRules-AG-1
+[DEBUG] Resource details loaded for: RecommendedAlertRules-AG-1
+[DEBUG] Successfully loaded resource details for: dem01-nsg
+[DEBUG] Resource details loaded for: dem01-nsg
+[DEBUG] Successfully loaded resource details for: dem01-ip
+[DEBUG] Resource details loaded for: dem01-ip
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Successfully loaded resource details for: dem01-vnet
+[DEBUG] Resource details loaded for: dem01-vnet
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Successfully loaded resource details for: dem01211_z1
+[DEBUG] Resource details loaded for: dem01211_z1
+[DEBUG] Loading resource details for: dem01211_z1 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkInterfaces/dem01211_z1)
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Loading resource details for selected node: dem01
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Successfully loaded resource details for: dem01211_z1
+[DEBUG] Resource details loaded for: dem01211_z1
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Metrics timeout for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01 after 5s
+[DEBUG] Fallback to demo metrics for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01
+[DEBUG] LogEntries timeout for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01 after 5s
+[DEBUG] Fallback to demo log entries for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01
+[DEBUG] DashboardData: errors=[Metrics: timeout after 5s Log entries: timeout after 5s], metrics=&{/subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01 75.2 68.5 12.3 8.7 45.2 23.1 2025-06-20 20:13:11.495504486 +0100 BST m=+48.266228185 map[]}, usage=[{Percentage CPU N/A N/A}], alarms=[{Percentage CPU - dem01 OK Severity: 3, Window: PT5M} {OS Disk IOPS Consumed Percentage - dem01 OK Severity: 3, Window: PT5M} {Available Memory Bytes - dem01 OK Severity: 3, Window: PT5M} {VM Availability - dem01 OK Severity: 3, Window: PT5M} {Network Out Total - dem01 OK Severity: 3, Window: PT5M} {Network In Total - dem01 OK Severity: 3, Window: PT5M} {Data Disk IOPS Consumed Percentage - dem01 OK Severity: 3, Window: PT5M} {CPU Usage Percentage - demo_aks01 OK Severity: 3, Window: PT5M} {Memory Working Set Percentage - demo_aks01 OK Severity: 3, Window: PT5M}], logs=[{2025-06-20 18:13:22.284572238 +0100 BST m=-7140.944704073 INFO AzureActivity Resource health check completed Health green /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01} {2025-06-20 16:13:22.284572238 +0100 BST m=-14340.944704073 WARN AzureMonitor High CPU usage detected Performance yellow /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01} {2025-06-20 14:13:22.284572238 +0100 BST m=-21540.944704073 INFO AzureActivity Backup operation completed successfully Backup green /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01} {2025-06-20 12:13:22.284572238 +0100 BST m=-28740.944704073 ERROR AzureActivity Network connectivity issue detected Network red /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01} {2025-06-20 10:13:22.284572238 +0100 BST m=-35940.944704073 INFO AzureMonitor Auto-scaling event triggered Scaling green /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01}]
+[DEBUG] Starting Azure TUI application
+[DEBUG] Init command starting
+[DEBUG] loadDataInitMsg received, starting data load
+[DEBUG] VM status for dem01: VM running
+[DEBUG] Loading resource details for: dem01groupdiag (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Storage/storageAccounts/dem01groupdiag)
+[DEBUG] Loading resource details for: dem01-nsg (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkSecurityGroups/dem01-nsg)
+[DEBUG] Loading resource details for: dem01-ip (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/publicIPAddresses/dem01-ip)
+[DEBUG] Loading resource details for: dem01-vnet (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/virtualNetworks/dem01-vnet)
+[DEBUG] Loading resource details for: RecommendedAlertRules-AG-1 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/microsoft.insights/actiongroups/RecommendedAlertRules-AG-1)
+[DEBUG] Loading resource details for: dem01211_z1 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkInterfaces/dem01211_z1)
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Loading resource details for selected node: dem01
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Successfully loaded resource details for: dem01groupdiag
+[DEBUG] Resource details loaded for: dem01groupdiag
+[DEBUG] Successfully loaded resource details for: dem01-nsg
+[DEBUG] Resource details loaded for: dem01-nsg
+[DEBUG] Successfully loaded resource details for: dem01-ip
+[DEBUG] Resource details loaded for: dem01-ip
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Successfully loaded resource details for: RecommendedAlertRules-AG-1
+[DEBUG] Resource details loaded for: RecommendedAlertRules-AG-1
+[DEBUG] Successfully loaded resource details for: dem01-vnet
+[DEBUG] Resource details loaded for: dem01-vnet
+[DEBUG] Successfully loaded resource details for: dem01211_z1
+[DEBUG] Resource details loaded for: dem01211_z1
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Metrics timeout for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01 after 25s
+[DEBUG] LogEntries error for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01: failed to fetch resource logs: signal: killed
+[DEBUG] DashboardData: errors=[Metrics: timeout after 25s Log entries: failed to fetch resource logs: signal: killed], metrics=&{/subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01 0 0 0.04339885711669922 0.07374286651611328 0 0 2025-06-20 20:20:09.492503127 +0100 BST m=+40.984700452 map[Network In Total:[] Network Out Total:[] Percentage CPU:[]]}, usage=[{Percentage CPU N/A N/A}], alarms=[{Percentage CPU - dem01 OK Severity: 3, Window: PT5M} {OS Disk IOPS Consumed Percentage - dem01 OK Severity: 3, Window: PT5M} {Available Memory Bytes - dem01 OK Severity: 3, Window: PT5M} {VM Availability - dem01 OK Severity: 3, Window: PT5M} {Network Out Total - dem01 OK Severity: 3, Window: PT5M} {Network In Total - dem01 OK Severity: 3, Window: PT5M} {Data Disk IOPS Consumed Percentage - dem01 OK Severity: 3, Window: PT5M} {CPU Usage Percentage - demo_aks01 OK Severity: 3, Window: PT5M} {Memory Working Set Percentage - demo_aks01 OK Severity: 3, Window: PT5M}], logs=[]
+[DEBUG] Starting Azure TUI application
+[DEBUG] Init command starting
+[DEBUG] loadDataInitMsg received, starting data load
+[DEBUG] VM status for dem01: VM deallocated
+[DEBUG] Loading resource details for: dem01groupdiag (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Storage/storageAccounts/dem01groupdiag)
+[DEBUG] Loading resource details for: dem01-nsg (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkSecurityGroups/dem01-nsg)
+[DEBUG] Loading resource details for: dem01-ip (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/publicIPAddresses/dem01-ip)
+[DEBUG] Loading resource details for: dem01-vnet (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/virtualNetworks/dem01-vnet)
+[DEBUG] Loading resource details for: RecommendedAlertRules-AG-1 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/microsoft.insights/actiongroups/RecommendedAlertRules-AG-1)
+[DEBUG] Loading resource details for: dem01211_z1 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkInterfaces/dem01211_z1)
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Loading resource details for selected node: dem01
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Successfully loaded resource details for: dem01groupdiag
+[DEBUG] Resource details loaded for: dem01groupdiag
+[DEBUG] Successfully loaded resource details for: RecommendedAlertRules-AG-1
+[DEBUG] Resource details loaded for: RecommendedAlertRules-AG-1
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Successfully loaded resource details for: dem01-nsg
+[DEBUG] Resource details loaded for: dem01-nsg
+[DEBUG] Successfully loaded resource details for: dem01-vnet
+[DEBUG] Resource details loaded for: dem01-vnet
+[DEBUG] Successfully loaded resource details for: dem01-ip
+[DEBUG] Resource details loaded for: dem01-ip
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Successfully loaded resource details for: dem01211_z1
+[DEBUG] Resource details loaded for: dem01211_z1
+[DEBUG] Loading resource details for: dem01211_z1 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkInterfaces/dem01211_z1)
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Loading resource details for selected node: dem01
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Successfully loaded resource details for: dem01211_z1
+[DEBUG] Resource details loaded for: dem01211_z1
+[DEBUG] Loading resource details for: dem01_OsDisk_1_0db7072a0d224dc4aa0bd8f471cfb02b (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/DEM01_GROUP/providers/Microsoft.Compute/disks/dem01_OsDisk_1_0db7072a0d224dc4aa0bd8f471cfb02b)
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Loading resource details for selected node: dem01
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Successfully loaded resource details for: dem01_OsDisk_1_0db7072a0d224dc4aa0bd8f471cfb02b
+[DEBUG] Resource details loaded for: dem01_OsDisk_1_0db7072a0d224dc4aa0bd8f471cfb02b
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Metrics timeout for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01 after 25s
+[DEBUG] LogEntries error for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01: failed to fetch resource logs: signal: killed
+[DEBUG] DashboardData: errors=[Metrics: timeout after 25s Log entries: failed to fetch resource logs: signal: killed], metrics=&{/subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01 0 0 0 0 0 0 2025-06-20 23:47:03.945310007 +0100 BST m=+11661.174703407 map[Network In Total:[] Network Out Total:[] Percentage CPU:[]]}, usage=[{Percentage CPU N/A N/A}], alarms=[{Percentage CPU - dem01 OK Severity: 3, Window: PT5M} {OS Disk IOPS Consumed Percentage - dem01 OK Severity: 3, Window: PT5M} {Available Memory Bytes - dem01 OK Severity: 3, Window: PT5M} {VM Availability - dem01 OK Severity: 3, Window: PT5M} {Network Out Total - dem01 OK Severity: 3, Window: PT5M} {Network In Total - dem01 OK Severity: 3, Window: PT5M} {Data Disk IOPS Consumed Percentage - dem01 OK Severity: 3, Window: PT5M} {CPU Usage Percentage - demo_aks01 OK Severity: 3, Window: PT5M} {Memory Working Set Percentage - demo_aks01 OK Severity: 3, Window: PT5M}], logs=[]
+[DEBUG] Starting Azure TUI application
+[DEBUG] Init command starting
+[DEBUG] loadDataInitMsg received, starting data load
+[DEBUG] VM status for dem01: VM deallocated
+[DEBUG] Loading resource details for: dem01groupdiag (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Storage/storageAccounts/dem01groupdiag)
+[DEBUG] Loading resource details for: dem01-nsg (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkSecurityGroups/dem01-nsg)
+[DEBUG] Loading resource details for: dem01-ip (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/publicIPAddresses/dem01-ip)
+[DEBUG] Loading resource details for: dem01-vnet (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/virtualNetworks/dem01-vnet)
+[DEBUG] Loading resource details for: RecommendedAlertRules-AG-1 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/microsoft.insights/actiongroups/RecommendedAlertRules-AG-1)
+[DEBUG] Loading resource details for: dem01211_z1 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkInterfaces/dem01211_z1)
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Loading resource details for selected node: dem01
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Successfully loaded resource details for: dem01groupdiag
+[DEBUG] Resource details loaded for: dem01groupdiag
+[DEBUG] Successfully loaded resource details for: RecommendedAlertRules-AG-1
+[DEBUG] Resource details loaded for: RecommendedAlertRules-AG-1
+[DEBUG] Successfully loaded resource details for: dem01-ip
+[DEBUG] Resource details loaded for: dem01-ip
+[DEBUG] Successfully loaded resource details for: dem01-vnet
+[DEBUG] Resource details loaded for: dem01-vnet
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Successfully loaded resource details for: dem01-nsg
+[DEBUG] Resource details loaded for: dem01-nsg
+[DEBUG] Successfully loaded resource details for: dem01211_z1
+[DEBUG] Resource details loaded for: dem01211_z1
+[DEBUG] Loading resource details for: dem01211_z1 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkInterfaces/dem01211_z1)
+[DEBUG] Loading resource details for: dem01 (ID: /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Compute/virtualMachines/dem01)
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Successfully loaded resource details for: dem01
+[DEBUG] Resource details loaded for: dem01
+[DEBUG] Successfully loaded resource details for: dem01211_z1
+[DEBUG] Resource details loaded for: dem01211_z1
+[DEBUG] LogEntries error for resource /subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkInterfaces/dem01211_z1: failed to fetch resource logs: signal: killed
+[DEBUG] DashboardData: errors=[Log entries: failed to fetch resource logs: signal: killed], metrics=&{/subscriptions/46b2dfbe-fe9e-4433-b327-b2dc32c8af5e/resourceGroups/dem01_group/providers/Microsoft.Network/networkInterfaces/dem01211_z1 0 0 0 0 0 0 2025-06-21 01:29:42.03336822 +0100 BST m=+5457.430479718 map[]}, usage=[{Bytes Sent N/A N/A}], alarms=[{Percentage CPU - dem01 OK Severity: 3, Window: PT5M} {OS Disk IOPS Consumed Percentage - dem01 OK Severity: 3, Window: PT5M} {Available Memory Bytes - dem01 OK Severity: 3, Window: PT5M} {VM Availability - dem01 OK Severity: 3, Window: PT5M} {Network Out Total - dem01 OK Severity: 3, Window: PT5M} {Network In Total - dem01 OK Severity: 3, Window: PT5M} {Data Disk IOPS Consumed Percentage - dem01 OK Severity: 3, Window: PT5M} {CPU Usage Percentage - demo_aks01 OK Severity: 3, Window: PT5M} {Memory Working Set Percentage - demo_aks01 OK Severity: 3, Window: PT5M}], logs=[]

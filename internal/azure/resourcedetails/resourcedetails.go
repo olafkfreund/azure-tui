@@ -3,12 +3,33 @@ package resourcedetails
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/olafkfreund/azure-tui/internal/azure/usage"
 )
+
+// Global debug file and sync for resourcedetails package
+var debugFile *os.File
+var debugFileOnce sync.Once
+
+// debugLog writes debug messages to debug.txt from resourcedetails package
+func debugLog(format string, a ...interface{}) {
+	debugFileOnce.Do(func() {
+		var err error
+		debugFile, err = os.OpenFile("debug.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			// fallback to stderr if file can't be opened
+			debugFile = os.Stderr
+		}
+	})
+	if debugFile != nil {
+		fmt.Fprintf(debugFile, format, a...)
+	}
+}
 
 // ResourceDetails represents detailed information about an Azure resource
 type ResourceDetails struct {
@@ -340,21 +361,49 @@ func GetComprehensiveDashboardDataWithProgress(resourceID string, progressCallba
 		}
 	}
 
+	// Helper to run a function with timeout and fallback
+	runWithTimeout := func(timeout time.Duration, fn func() error, fallback func(error), label string) {
+		done := make(chan error, 1)
+		go func() { done <- fn() }()
+		select {
+		case err := <-done:
+			if err != nil {
+				debugLog("[DEBUG] %s error for resource %s: %v\n", label, resourceID, err)
+				fallback(err)
+			}
+		case <-time.After(timeout):
+			debugLog("[DEBUG] %s timeout for resource %s after %s\n", label, resourceID, timeout)
+			fallback(fmt.Errorf("timeout after %s", timeout))
+		}
+	}
+
 	// Load Resource Details
 	updateProgress("Loading resource details...", "ResourceDetails", "loading", 0, nil)
-	resourceDetails, err := GetResourceDetails(resourceID)
-	if err != nil {
-		updateProgress("Resource details failed", "ResourceDetails", "failed", 0, err)
-		dashboardData.Errors = append(dashboardData.Errors, fmt.Sprintf("Resource details: %v", err))
-	} else {
+	runWithTimeout(5*time.Second, func() error {
+		resourceDetails, err := GetResourceDetails(resourceID)
+		if err != nil {
+			return err
+		}
 		updateProgress("Resource details loaded", "ResourceDetails", "completed", 1, nil)
 		dashboardData.ResourceDetails = resourceDetails
-	}
+		return nil
+	}, func(err error) {
+		updateProgress("Resource details failed", "ResourceDetails", "failed", 0, err)
+		dashboardData.Errors = append(dashboardData.Errors, fmt.Sprintf("Resource details: %v", err))
+	}, "ResourceDetails")
 
 	// Load Metrics
 	updateProgress("Loading resource metrics...", "Metrics", "loading", 0, nil)
-	metrics, err := GetResourceMetrics(resourceID)
-	if err != nil {
+	runWithTimeout(5*time.Second, func() error {
+		metrics, err := GetResourceMetrics(resourceID)
+		if err != nil {
+			return err
+		}
+		updateProgress("Metrics loaded", "Metrics", "completed", 1, nil)
+		dashboardData.Metrics = metrics
+		return nil
+	}, func(err error) {
+		debugLog("[DEBUG] Fallback to demo metrics for resource %s\n", resourceID)
 		updateProgress("Metrics failed", "Metrics", "failed", 0, err)
 		dashboardData.Errors = append(dashboardData.Errors, fmt.Sprintf("Metrics: %v", err))
 		// Create fallback metrics with demo data
@@ -369,49 +418,61 @@ func GetComprehensiveDashboardDataWithProgress(resourceID string, progressCallba
 			Timestamp:   time.Now(),
 			TrendData:   make(map[string][]float64),
 		}
-	} else {
-		updateProgress("Metrics loaded", "Metrics", "completed", 1, nil)
-		dashboardData.Metrics = metrics
-	}
+	}, "Metrics")
 
 	// Load Usage Metrics
 	updateProgress("Loading usage metrics...", "UsageMetrics", "loading", 0, nil)
-	usageMetrics, err := usage.ListUsageMetrics(resourceID)
-	if err != nil {
+	runWithTimeout(5*time.Second, func() error {
+		usageMetrics, err := usage.ListUsageMetrics(resourceID)
+		if err != nil {
+			return err
+		}
+		updateProgress("Usage metrics loaded", "UsageMetrics", "completed", len(usageMetrics), nil)
+		dashboardData.UsageMetrics = usageMetrics
+		return nil
+	}, func(err error) {
+		debugLog("[DEBUG] Fallback to demo usage metrics for resource %s\n", resourceID)
 		updateProgress("Usage metrics failed", "UsageMetrics", "failed", 0, err)
 		dashboardData.Errors = append(dashboardData.Errors, fmt.Sprintf("Usage metrics: %v", err))
 		// Create fallback usage data
 		dashboardData.UsageMetrics = []usage.UsageMetric{}
-	} else {
-		updateProgress("Usage metrics loaded", "UsageMetrics", "completed", len(usageMetrics), nil)
-		dashboardData.UsageMetrics = usageMetrics
-	}
+	}, "UsageMetrics")
 
 	// Load Alarms
 	updateProgress("Loading alarms and alerts...", "Alarms", "loading", 0, nil)
-	alarms, err := usage.ListAlarms(resourceID)
-	if err != nil {
+	runWithTimeout(5*time.Second, func() error {
+		alarms, err := usage.ListAlarms(resourceID)
+		if err != nil {
+			return err
+		}
+		updateProgress("Alarms loaded", "Alarms", "completed", len(alarms), nil)
+		dashboardData.Alarms = alarms
+		return nil
+	}, func(err error) {
+		debugLog("[DEBUG] Fallback to demo alarms for resource %s\n", resourceID)
 		updateProgress("Alarms failed", "Alarms", "failed", 0, err)
 		dashboardData.Errors = append(dashboardData.Errors, fmt.Sprintf("Alarms: %v", err))
 		// Create fallback alarm data
 		dashboardData.Alarms = []usage.Alarm{}
-	} else {
-		updateProgress("Alarms loaded", "Alarms", "completed", len(alarms), nil)
-		dashboardData.Alarms = alarms
-	}
+	}, "Alarms")
 
 	// Load and Parse Log Entries
 	updateProgress("Loading and parsing log entries...", "LogEntries", "loading", 0, nil)
-	logEntries, err := getResourceLogs(resourceID)
-	if err != nil {
+	runWithTimeout(5*time.Second, func() error {
+		logEntries, err := getResourceLogs(resourceID)
+		if err != nil {
+			return err
+		}
+		updateProgress("Log entries loaded", "LogEntries", "completed", len(logEntries), nil)
+		dashboardData.LogEntries = logEntries
+		return nil
+	}, func(err error) {
+		debugLog("[DEBUG] Fallback to demo log entries for resource %s\n", resourceID)
 		updateProgress("Log entries failed", "LogEntries", "failed", 0, err)
 		dashboardData.Errors = append(dashboardData.Errors, fmt.Sprintf("Log entries: %v", err))
 		// Create fallback log data
 		dashboardData.LogEntries = createFallbackLogEntries(resourceID)
-	} else {
-		updateProgress("Log entries loaded", "LogEntries", "completed", len(logEntries), nil)
-		dashboardData.LogEntries = logEntries
-	}
+	}, "LogEntries")
 
 	// Final progress update
 	progress.CurrentOperation = "Dashboard data loading completed"
@@ -426,6 +487,8 @@ func GetComprehensiveDashboardDataWithProgress(resourceID string, progressCallba
 	if progressCallback != nil {
 		progressCallback(progress)
 	}
+
+	debugLog("[DEBUG] DashboardData: errors=%v, metrics=%v, usage=%v, alarms=%v, logs=%v\n", dashboardData.Errors, dashboardData.Metrics, dashboardData.UsageMetrics, dashboardData.Alarms, dashboardData.LogEntries)
 
 	return dashboardData, nil
 }

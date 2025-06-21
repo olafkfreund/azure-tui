@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -42,6 +43,25 @@ var (
 	colorAqua   = lipgloss.Color("#8ec07c")
 	colorGray   = lipgloss.Color("#a89984")
 )
+
+// Global debug file and sync
+var debugFile *os.File
+var debugFileOnce sync.Once
+
+// debugLog writes debug messages to debug.txt
+func debugLog(format string, a ...interface{}) {
+	debugFileOnce.Do(func() {
+		var err error
+		debugFile, err = os.OpenFile("debug.txt", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+		if err != nil {
+			// fallback to stderr if file can't be opened
+			debugFile = os.Stderr
+		}
+	})
+	if debugFile != nil {
+		fmt.Fprintf(debugFile, format, a...)
+	}
+}
 
 type AzureResource struct {
 	ID            string                 `json:"id"`
@@ -1256,6 +1276,11 @@ func loadDashboardAsyncWithProgressCmd(resourceID string) tea.Cmd {
 		// In a real implementation, this would stream progress updates
 		dashboardData, err := resourcedetails.GetComprehensiveDashboardDataWithProgress(resourceID, nil)
 
+		// Debug print to debug.txt for error visibility
+		if err != nil {
+			debugLog("[DEBUG] Dashboard load error for resource %s: %v\n", resourceID, err)
+		}
+
 		// Return final result with better error handling
 		var dashboardContent string
 		if err != nil && dashboardData == nil {
@@ -1267,9 +1292,6 @@ func loadDashboardAsyncWithProgressCmd(resourceID string) tea.Cmd {
 		} else {
 			// Extract resource name from ID if possible, or use ID as fallback
 			resourceName := resourceID
-			if parts := strings.Split(resourceID, "/"); len(parts) > 0 {
-				resourceName = parts[len(parts)-1]
-			}
 			dashboardContent = tui.RenderComprehensiveDashboard(resourceName, dashboardData)
 		}
 
@@ -4881,26 +4903,6 @@ func executeTerraformOperationCmd(operation string, workspacePath string) tea.Cm
 			// Use the terraform package function
 			result, err = terraform.DestroyWorkspace(workspacePath, "", true)
 			if err == nil && result != "" {
-				result = "✅ Terraform destroy completed successfully:\n" + result
-			}
-		case "validate":
-			// Use the enhanced tfbicep package for better error handling
-			valid, issues, validationErr := tfbicep.ValidateTerraformConfig(workspacePath)
-			if validationErr != nil {
-				err = validationErr
-			} else if !valid {
-				result = "❌ Terraform validation failed:\n" + strings.Join(issues, "\n")
-				err = fmt.Errorf("validation failed")
-			} else {
-				result = "✅ Terraform configuration is valid"
-			}
-		case "format":
-			// Use the enhanced tfbicep package for formatting
-			formatErr := tfbicep.FormatTerraformFiles(workspacePath)
-			if formatErr != nil {
-				err = formatErr
-			} else {
-				result = "✅ Terraform files formatted successfully"
 			}
 		case "show":
 			// Show current state or plan
@@ -5344,6 +5346,13 @@ func selectSubscriptionCmd(subscriptionID string) tea.Cmd {
 }
 
 func main() {
+	// Ensure debug file is closed on exit
+	defer func() {
+		if debugFile != nil && debugFile != os.Stderr {
+			debugFile.Close()
+		}
+	}()
+
 	m := initModel()
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
