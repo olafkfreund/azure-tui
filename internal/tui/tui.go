@@ -996,6 +996,22 @@ func RenderEnhancedMetricsDashboard(resourceName string, metrics map[string]inte
 func RenderAKSDetails(clusterName string, aksDetails map[string]interface{}) string {
 	var content strings.Builder
 
+	if aksDetails == nil {
+		// Fallback: minimal AKS dashboard with error
+		content.WriteString("\n\n")
+		headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Background(lipgloss.Color("236")).Padding(0, 2)
+		content.WriteString(headerStyle.Render(fmt.Sprintf("🚢 AKS Cluster: %s", clusterName)))
+		content.WriteString("\n\n")
+		timeStyle := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("8"))
+		content.WriteString(timeStyle.Render("Last Updated: --"))
+		content.WriteString("\n\n")
+		content.WriteString("❌ Unable to load AKS cluster details.\n")
+		content.WriteString("The TUI is still running.\n")
+		content.WriteString("\n")
+		content.WriteString("Press [d] for Details view • [r] to refresh • Auto-refresh: 30s\n")
+		return content.String()
+	}
+
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Background(lipgloss.Color("236")).Padding(0, 2)
 	content.WriteString(headerStyle.Render(fmt.Sprintf("🚢 AKS Cluster: %s", clusterName)))
 	content.WriteString("\n\n")
@@ -1012,14 +1028,20 @@ func RenderAKSDetails(clusterName string, aksDetails map[string]interface{}) str
 			statusStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("9"))
 		}
 		content.WriteString(fmt.Sprintf("Status:         %s\n", statusStyle.Render(status)))
+	} else {
+		content.WriteString("Status:         Unknown\n")
 	}
 
 	if kubeVersion, ok := aksDetails["kubernetesVersion"].(string); ok {
 		content.WriteString(fmt.Sprintf("Kubernetes:     %s\n", kubeVersion))
+	} else {
+		content.WriteString("Kubernetes:     Unknown\n")
 	}
 
 	if nodeCount, ok := aksDetails["nodeCount"].(int); ok {
 		content.WriteString(fmt.Sprintf("Total Nodes:    %d\n", nodeCount))
+	} else {
+		content.WriteString("Total Nodes:    Unknown\n")
 	}
 
 	// Node Pools
@@ -1030,15 +1052,17 @@ func RenderAKSDetails(clusterName string, aksDetails map[string]interface{}) str
 
 		for _, pool := range nodePools {
 			if poolMap, ok := pool.(map[string]interface{}); ok {
-				name := poolMap["name"].(string)
-				count := poolMap["count"].(int)
-				vmSize := poolMap["vmSize"].(string)
-				osType := poolMap["osType"].(string)
+				name, _ := poolMap["name"].(string)
+				count, _ := poolMap["count"].(int)
+				vmSize, _ := poolMap["vmSize"].(string)
+				osType, _ := poolMap["osType"].(string)
 
 				poolStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("14"))
 				content.WriteString(fmt.Sprintf("%s: %d × %s (%s)\n", poolStyle.Render(name), count, vmSize, osType))
 			}
 		}
+	} else {
+		content.WriteString("No node pools found.\n")
 	}
 
 	// Pods Summary
@@ -1052,8 +1076,8 @@ func RenderAKSDetails(clusterName string, aksDetails map[string]interface{}) str
 
 		for _, pod := range pods {
 			if podMap, ok := pod.(map[string]interface{}); ok {
-				status := podMap["status"].(string)
-				namespace := podMap["namespace"].(string)
+				status, _ := podMap["status"].(string)
+				namespace, _ := podMap["namespace"].(string)
 				podCounts[status]++
 				nsCounts[namespace]++
 			}
@@ -1072,11 +1096,13 @@ func RenderAKSDetails(clusterName string, aksDetails map[string]interface{}) str
 
 		content.WriteString("\nTop Namespaces:\n")
 		for ns, count := range nsCounts {
-			if count > 1 { // Only show namespaces with multiple pods
+			if count > 1 {
 				nsStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("12"))
 				content.WriteString(fmt.Sprintf("%s: %d pods\n", nsStyle.Render(ns), count))
 			}
 		}
+	} else {
+		content.WriteString("No pod data available.\n")
 	}
 
 	// Deployments Summary
@@ -1087,22 +1113,22 @@ func RenderAKSDetails(clusterName string, aksDetails map[string]interface{}) str
 
 		content.WriteString(fmt.Sprintf("Total Deployments: %d\n", len(deployments)))
 
-		// Show first few deployments
 		for i, deploy := range deployments {
-			if i >= 5 { // Limit to first 5
+			if i >= 5 {
 				content.WriteString(fmt.Sprintf("... and %d more\n", len(deployments)-5))
 				break
 			}
-
 			if deployMap, ok := deploy.(map[string]interface{}); ok {
-				name := deployMap["name"].(string)
-				namespace := deployMap["namespace"].(string)
-				ready := deployMap["ready"].(string)
+				name, _ := deployMap["name"].(string)
+				namespace, _ := deployMap["namespace"].(string)
+				ready, _ := deployMap["ready"].(string)
 
 				deployStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("13"))
 				content.WriteString(fmt.Sprintf("%s (%s): %s\n", deployStyle.Render(name), namespace, ready))
 			}
 		}
+	} else {
+		content.WriteString("No deployment data available.\n")
 	}
 
 	// Services Summary
@@ -1114,7 +1140,7 @@ func RenderAKSDetails(clusterName string, aksDetails map[string]interface{}) str
 		typeCounts := make(map[string]int)
 		for _, svc := range services {
 			if svcMap, ok := svc.(map[string]interface{}); ok {
-				svcType := svcMap["type"].(string)
+				svcType, _ := svcMap["type"].(string)
 				typeCounts[svcType]++
 			}
 		}
@@ -1124,6 +1150,8 @@ func RenderAKSDetails(clusterName string, aksDetails map[string]interface{}) str
 			typeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("15"))
 			content.WriteString(fmt.Sprintf("%s: %d\n", typeStyle.Render(svcType), count))
 		}
+	} else {
+		content.WriteString("No service data available.\n")
 	}
 
 	return content.String()
@@ -1503,6 +1531,22 @@ func RenderDashboardLoadingProgress(progress DashboardLoadingProgress) string {
 func RenderComprehensiveDashboard(resourceName string, data *ComprehensiveDashboardData) string {
 	var content strings.Builder
 
+	if data == nil {
+		// Fallback: minimal dashboard with error
+		content.WriteString("\n\n")
+		headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Padding(0, 1)
+		content.WriteString(headerStyle.Render(fmt.Sprintf("📊 Comprehensive Dashboard: %s", resourceName)))
+		content.WriteString("\n\n")
+		timeStyle := lipgloss.NewStyle().Faint(true).Foreground(lipgloss.Color("8"))
+		content.WriteString(timeStyle.Render("Last Updated: --"))
+		content.WriteString("\n\n")
+		content.WriteString("❌ Unable to load dashboard data.\n")
+		content.WriteString("The TUI is still running.\n")
+		content.WriteString("\n")
+		content.WriteString("Press [d] for Details view • [r] to refresh • Auto-refresh: 30s\n")
+		return content.String()
+	}
+
 	// Dashboard Header
 	headerStyle := lipgloss.NewStyle().Bold(true).Foreground(lipgloss.Color("39")).Padding(0, 1)
 	content.WriteString(headerStyle.Render(fmt.Sprintf("📊 Comprehensive Dashboard: %s", resourceName)))
@@ -1810,6 +1854,8 @@ func getLogLevelIcon(status string) string {
 		return "🟡"
 	case "green":
 		return "🟢"
+	case "blue":
+		return "🔵"
 	default:
 		return "🔵"
 	}

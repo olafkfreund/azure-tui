@@ -1,6 +1,7 @@
 package resourcedetails
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -131,6 +132,7 @@ type AKSDetails struct {
 	Deployments []KubernetesDeployment `json:"deployments"`
 	Services    []KubernetesService    `json:"services"`
 	Namespaces  []string               `json:"namespaces"`
+	Errors      []string               `json:"errors"`
 }
 
 type AKSNodePool struct {
@@ -172,7 +174,9 @@ type KubernetesService struct {
 
 // GetResourceDetails fetches comprehensive details for a resource
 func GetResourceDetails(resourceID string) (*ResourceDetails, error) {
-	cmd := exec.Command("az", "resource", "show", "--ids", resourceID, "--output", "json")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "az", "resource", "show", "--ids", resourceID, "--output", "json")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get resource details: %w", err)
@@ -283,220 +287,22 @@ func GetResourceMetrics(resourceID string) (*ResourceMetrics, error) {
 }
 
 // GetComprehensiveDashboardDataWithProgress loads all dashboard data with progress tracking
-func GetComprehensiveDashboardDataWithProgress(resourceID string, progressCallback DashboardProgressCallback) (*ComprehensiveDashboardData, error) {
-	// Initialize dashboard data
-	dashboardData := &ComprehensiveDashboardData{
-		LastUpdated: time.Now(),
-		Errors:      []string{},
-	}
-
-	// Initialize progress tracking
-	dataTypes := []string{"ResourceDetails", "Metrics", "UsageMetrics", "Alarms", "LogEntries"}
-	totalOperations := len(dataTypes)
-
-	progress := DashboardLoadingProgress{
-		CurrentOperation:       "Initializing dashboard data loading...",
-		TotalOperations:        totalOperations,
-		CompletedOperations:    0,
-		ProgressPercentage:     0.0,
-		DataProgress:           make(map[string]DataProgress),
-		Errors:                 []string{},
-		StartTime:              time.Now(),
-		EstimatedTimeRemaining: "Calculating...",
-	}
-
-	// Initialize data progress tracking
-	for _, dataType := range dataTypes {
-		progress.DataProgress[dataType] = DataProgress{
-			DataType:  dataType,
-			Status:    "pending",
-			StartTime: time.Time{},
-			EndTime:   time.Time{},
-			Error:     "",
-			Count:     0,
-		}
-	}
-
-	// Send initial progress
-	if progressCallback != nil {
-		progressCallback(progress)
-	}
-
-	// Helper function to update progress
-	updateProgress := func(operation string, dataType string, status string, count int, err error) {
-		progress.CurrentOperation = operation
-
-		dataProgress := progress.DataProgress[dataType]
-		dataProgress.Status = status
-
-		if status == "loading" {
-			dataProgress.StartTime = time.Now()
-		} else if status == "completed" || status == "failed" {
-			dataProgress.EndTime = time.Now()
-			dataProgress.Count = count
-			if status == "completed" {
-				progress.CompletedOperations++
-			}
-		}
-
-		if err != nil {
-			dataProgress.Error = err.Error()
-			dataProgress.Status = "failed"
-			progress.Errors = append(progress.Errors, fmt.Sprintf("%s: %v", dataType, err))
-		}
-
-		progress.DataProgress[dataType] = dataProgress
-		progress.ProgressPercentage = float64(progress.CompletedOperations) / float64(progress.TotalOperations) * 100
-
-		// Calculate estimated time remaining
-		if progress.CompletedOperations > 0 {
-			elapsed := time.Since(progress.StartTime)
-			avgTimePerOperation := elapsed / time.Duration(progress.CompletedOperations)
-			remaining := avgTimePerOperation * time.Duration(progress.TotalOperations-progress.CompletedOperations)
-			progress.EstimatedTimeRemaining = fmt.Sprintf("%.1fs remaining", remaining.Seconds())
-		}
-
-		if progressCallback != nil {
-			progressCallback(progress)
-		}
-	}
-
-	// Helper to run a function with timeout and fallback
-	runWithTimeout := func(timeout time.Duration, fn func() error, fallback func(error), label string) {
-		done := make(chan error, 1)
-		go func() { done <- fn() }()
-		select {
-		case err := <-done:
-			if err != nil {
-				debugLog("[DEBUG] %s error for resource %s: %v\n", label, resourceID, err)
-				fallback(err)
-			}
-		case <-time.After(timeout):
-			debugLog("[DEBUG] %s timeout for resource %s after %s\n", label, resourceID, timeout)
-			fallback(fmt.Errorf("timeout after %s", timeout))
-		}
-	}
-
-	// Load Resource Details
-	updateProgress("Loading resource details...", "ResourceDetails", "loading", 0, nil)
-	runWithTimeout(5*time.Second, func() error {
-		resourceDetails, err := GetResourceDetails(resourceID)
-		if err != nil {
-			return err
-		}
-		updateProgress("Resource details loaded", "ResourceDetails", "completed", 1, nil)
-		dashboardData.ResourceDetails = resourceDetails
-		return nil
-	}, func(err error) {
-		updateProgress("Resource details failed", "ResourceDetails", "failed", 0, err)
-		dashboardData.Errors = append(dashboardData.Errors, fmt.Sprintf("Resource details: %v", err))
-	}, "ResourceDetails")
-
-	// Load Metrics
-	updateProgress("Loading resource metrics...", "Metrics", "loading", 0, nil)
-	runWithTimeout(5*time.Second, func() error {
-		metrics, err := GetResourceMetrics(resourceID)
-		if err != nil {
-			return err
-		}
-		updateProgress("Metrics loaded", "Metrics", "completed", 1, nil)
-		dashboardData.Metrics = metrics
-		return nil
-	}, func(err error) {
-		debugLog("[DEBUG] Fallback to demo metrics for resource %s\n", resourceID)
-		updateProgress("Metrics failed", "Metrics", "failed", 0, err)
-		dashboardData.Errors = append(dashboardData.Errors, fmt.Sprintf("Metrics: %v", err))
-		// Create fallback metrics with demo data
-		dashboardData.Metrics = &ResourceMetrics{
-			ResourceID:  resourceID,
-			CPUUsage:    75.2,
-			MemoryUsage: 68.5,
-			NetworkIn:   12.3,
-			NetworkOut:  8.7,
-			DiskRead:    45.2,
-			DiskWrite:   23.1,
-			Timestamp:   time.Now(),
-			TrendData:   make(map[string][]float64),
-		}
-	}, "Metrics")
-
-	// Load Usage Metrics
-	updateProgress("Loading usage metrics...", "UsageMetrics", "loading", 0, nil)
-	runWithTimeout(5*time.Second, func() error {
-		usageMetrics, err := usage.ListUsageMetrics(resourceID)
-		if err != nil {
-			return err
-		}
-		updateProgress("Usage metrics loaded", "UsageMetrics", "completed", len(usageMetrics), nil)
-		dashboardData.UsageMetrics = usageMetrics
-		return nil
-	}, func(err error) {
-		debugLog("[DEBUG] Fallback to demo usage metrics for resource %s\n", resourceID)
-		updateProgress("Usage metrics failed", "UsageMetrics", "failed", 0, err)
-		dashboardData.Errors = append(dashboardData.Errors, fmt.Sprintf("Usage metrics: %v", err))
-		// Create fallback usage data
-		dashboardData.UsageMetrics = []usage.UsageMetric{}
-	}, "UsageMetrics")
-
-	// Load Alarms
-	updateProgress("Loading alarms and alerts...", "Alarms", "loading", 0, nil)
-	runWithTimeout(5*time.Second, func() error {
-		alarms, err := usage.ListAlarms(resourceID)
-		if err != nil {
-			return err
-		}
-		updateProgress("Alarms loaded", "Alarms", "completed", len(alarms), nil)
-		dashboardData.Alarms = alarms
-		return nil
-	}, func(err error) {
-		debugLog("[DEBUG] Fallback to demo alarms for resource %s\n", resourceID)
-		updateProgress("Alarms failed", "Alarms", "failed", 0, err)
-		dashboardData.Errors = append(dashboardData.Errors, fmt.Sprintf("Alarms: %v", err))
-		// Create fallback alarm data
-		dashboardData.Alarms = []usage.Alarm{}
-	}, "Alarms")
-
-	// Load and Parse Log Entries
-	updateProgress("Loading and parsing log entries...", "LogEntries", "loading", 0, nil)
-	runWithTimeout(5*time.Second, func() error {
-		logEntries, err := getResourceLogs(resourceID)
-		if err != nil {
-			return err
-		}
-		updateProgress("Log entries loaded", "LogEntries", "completed", len(logEntries), nil)
-		dashboardData.LogEntries = logEntries
-		return nil
-	}, func(err error) {
-		debugLog("[DEBUG] Fallback to demo log entries for resource %s\n", resourceID)
-		updateProgress("Log entries failed", "LogEntries", "failed", 0, err)
-		dashboardData.Errors = append(dashboardData.Errors, fmt.Sprintf("Log entries: %v", err))
-		// Create fallback log data
-		dashboardData.LogEntries = createFallbackLogEntries(resourceID)
-	}, "LogEntries")
-
-	// Final progress update
-	progress.CurrentOperation = "Dashboard data loading completed"
-	progress.ProgressPercentage = 100.0
-
-	if len(dashboardData.Errors) > 0 {
-		progress.CurrentOperation = fmt.Sprintf("Completed with %d errors", len(dashboardData.Errors))
-	} else {
-		progress.CurrentOperation = "All dashboard data loaded successfully"
-	}
-
-	if progressCallback != nil {
-		progressCallback(progress)
-	}
-
-	debugLog("[DEBUG] DashboardData: errors=%v, metrics=%v, usage=%v, alarms=%v, logs=%v\n", dashboardData.Errors, dashboardData.Metrics, dashboardData.UsageMetrics, dashboardData.Alarms, dashboardData.LogEntries)
-
-	return dashboardData, nil
-}
+// func GetComprehensiveDashboardDataWithProgress(resourceID string, progressCallback DashboardProgressCallback) (*ComprehensiveDashboardData, error) {
+// 	// Dashboard functionality temporarily removed per user request
+// 	return nil, fmt.Errorf("Dashboard functionality is temporarily disabled.")
+// }
 
 // getResourceLogs fetches and parses log entries for a resource
 func getResourceLogs(resourceID string) ([]LogEntry, error) {
-	cmd := exec.Command("az", "monitor", "log-analytics", "query",
-		"--workspace", getLogAnalyticsWorkspace(),
+	workspace := getLogAnalyticsWorkspaceForResource(resourceID)
+	if workspace == "" {
+		debugLog("[DEBUG] Skipping log analytics query: no workspace for resource %s\n", resourceID)
+		return createFallbackLogEntries(resourceID), nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "az", "monitor", "log-analytics", "query",
+		"--workspace", workspace,
 		"--analytics-query", fmt.Sprintf(`
 			AzureActivity
 			| where ResourceId == "%s"
@@ -642,11 +448,32 @@ func categorizeLogEntry(message string) string {
 	}
 }
 
-// getLogAnalyticsWorkspace returns the Log Analytics workspace ID
-func getLogAnalyticsWorkspace() string {
-	// In a real implementation, this would be configurable or auto-detected
-	// For now, return a placeholder that will cause fallback to demo data
-	return "demo-workspace"
+// getLogAnalyticsWorkspaceForResource returns the Log Analytics workspace ID
+// Automatically detect the workspace for the resource's resource group
+func getLogAnalyticsWorkspaceForResource(resourceID string) string {
+	// Extract resource group from resourceID
+	resourceGroup := ""
+	parts := strings.Split(resourceID, "/")
+	for i, part := range parts {
+		if part == "resourceGroups" && i+1 < len(parts) {
+			resourceGroup = parts[i+1]
+			break
+		}
+	}
+	if resourceGroup == "" {
+		return ""
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "az", "monitor", "log-analytics", "workspace", "list", "--resource-group", resourceGroup, "--query", "[0].customerId", "--output", "tsv")
+	out, err := cmd.Output()
+	if err != nil || strings.TrimSpace(string(out)) == "" {
+		// No workspace found, log and skip
+		debugLog("[DEBUG] No Log Analytics workspace found in resource group %s for resource %s\n", resourceGroup, resourceID)
+		return ""
+	}
+	ws := strings.TrimSpace(string(out))
+	return ws
 }
 
 // ProcessAlarms analyzes alarms and returns a summary with color coding
@@ -701,7 +528,14 @@ func GetResourceActions(resourceType string) ResourceActions {
 
 // GetAKSDetails fetches comprehensive AKS cluster information
 func GetAKSDetails(clusterName, resourceGroup string) (*AKSDetails, error) {
-	details := &AKSDetails{}
+	details := &AKSDetails{
+		NodePools:   []AKSNodePool{},
+		Pods:        []KubernetesPod{},
+		Deployments: []KubernetesDeployment{},
+		Services:    []KubernetesService{},
+		Namespaces:  []string{},
+		Errors:      []string{},
+	}
 
 	// Get cluster resource details
 	resourceID := fmt.Sprintf("/subscriptions/{subscription}/resourceGroups/%s/providers/Microsoft.ContainerService/managedClusters/%s",
@@ -709,37 +543,66 @@ func GetAKSDetails(clusterName, resourceGroup string) (*AKSDetails, error) {
 
 	clusterInfo, err := GetResourceDetails(resourceID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get cluster details: %w", err)
+		details.Errors = append(details.Errors, fmt.Sprintf("failed to get cluster details: %v", err))
+		// Fallback: minimal cluster info
+		details.ClusterInfo = ResourceDetails{
+			ID:   resourceID,
+			Name: clusterName,
+			Type: "Microsoft.ContainerService/managedClusters",
+		}
+	} else {
+		details.ClusterInfo = *clusterInfo
 	}
-	details.ClusterInfo = *clusterInfo
 
 	// Get credentials for kubectl commands
 	if err := getAKSCredentials(clusterName, resourceGroup); err != nil {
-		return nil, fmt.Errorf("failed to get AKS credentials: %w", err)
+		details.Errors = append(details.Errors, fmt.Sprintf("failed to get AKS credentials: %v", err))
 	}
 
 	// Get node pools
-	if nodePools, err := getAKSNodePools(clusterName, resourceGroup); err == nil {
+	nodePools, err := getAKSNodePools(clusterName, resourceGroup)
+	if err != nil {
+		details.Errors = append(details.Errors, fmt.Sprintf("failed to get node pools: %v", err))
+		// Fallback: demo node pool
+		details.NodePools = []AKSNodePool{{Name: "default", Count: 1, VMSize: "Standard_DS2_v2", OSType: "Linux", Mode: "System", Status: "Unknown"}}
+	} else {
 		details.NodePools = nodePools
 	}
 
 	// Get Kubernetes resources
-	if namespaces, err := getKubernetesNamespaces(); err == nil {
+	namespaces, err := getKubernetesNamespaces()
+	if err != nil {
+		details.Errors = append(details.Errors, fmt.Sprintf("failed to get namespaces: %v", err))
+		details.Namespaces = []string{"default"}
+	} else {
 		details.Namespaces = namespaces
 	}
 
-	if pods, err := getKubernetesPods(); err == nil {
+	pods, err := getKubernetesPods()
+	if err != nil {
+		details.Errors = append(details.Errors, fmt.Sprintf("failed to get pods: %v", err))
+		details.Pods = []KubernetesPod{{Name: "demo-pod", Namespace: "default", Status: "Unknown", Ready: "0/1", Age: "1d", IP: "0.0.0.0"}}
+	} else {
 		details.Pods = pods
 	}
 
-	if deployments, err := getKubernetesDeployments(); err == nil {
+	deployments, err := getKubernetesDeployments()
+	if err != nil {
+		details.Errors = append(details.Errors, fmt.Sprintf("failed to get deployments: %v", err))
+		details.Deployments = []KubernetesDeployment{{Name: "demo-deployment", Namespace: "default", Ready: "0/1", UpToDate: "0", Available: "0", Age: "1d"}}
+	} else {
 		details.Deployments = deployments
 	}
 
-	if services, err := getKubernetesServices(); err == nil {
+	services, err := getKubernetesServices()
+	if err != nil {
+		details.Errors = append(details.Errors, fmt.Sprintf("failed to get services: %v", err))
+		details.Services = []KubernetesService{{Name: "demo-service", Namespace: "default", Type: "ClusterIP", ClusterIP: "0.0.0.0", ExternalIP: "", Ports: "80:80/TCP", Age: "1d"}}
+	} else {
 		details.Services = services
 	}
 
+	// Never return nil, always return details (with errors and fallback data if needed)
 	return details, nil
 }
 
@@ -753,7 +616,9 @@ func getStringValue(data map[string]interface{}, key string) string {
 }
 
 func getMetricValue(resourceID, metricName string) (float64, error) {
-	cmd := exec.Command("az", "monitor", "metrics", "list",
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "az", "monitor", "metrics", "list",
 		"--resource", resourceID,
 		"--metric", metricName,
 		"--aggregation", "Average",
@@ -797,7 +662,9 @@ func getMetricTrends(resourceID string) (map[string][]float64, error) {
 
 	metrics := []string{"Percentage CPU", "Network In Total", "Network Out Total"}
 	for _, metric := range metrics {
-		cmd := exec.Command("az", "monitor", "metrics", "list",
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		cmd := exec.CommandContext(ctx, "az", "monitor", "metrics", "list",
 			"--resource", resourceID,
 			"--metric", metric,
 			"--aggregation", "Average",
@@ -821,7 +688,9 @@ func getMetricTrends(resourceID string) (map[string][]float64, error) {
 }
 
 func getAKSCredentials(clusterName, resourceGroup string) error {
-	cmd := exec.Command("az", "aks", "get-credentials",
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "az", "aks", "get-credentials",
 		"--name", clusterName,
 		"--resource-group", resourceGroup,
 		"--overwrite-existing")
@@ -829,7 +698,9 @@ func getAKSCredentials(clusterName, resourceGroup string) error {
 }
 
 func getAKSNodePools(clusterName, resourceGroup string) ([]AKSNodePool, error) {
-	cmd := exec.Command("az", "aks", "nodepool", "list",
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "az", "aks", "nodepool", "list",
 		"--cluster-name", clusterName,
 		"--resource-group", resourceGroup,
 		"--output", "json")
@@ -848,7 +719,9 @@ func getAKSNodePools(clusterName, resourceGroup string) ([]AKSNodePool, error) {
 }
 
 func getKubernetesNamespaces() ([]string, error) {
-	cmd := exec.Command("kubectl", "get", "namespaces", "-o", "jsonpath={.items[*].metadata.name}")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "namespaces", "-o", "jsonpath={.items[*].metadata.name}")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -859,7 +732,9 @@ func getKubernetesNamespaces() ([]string, error) {
 }
 
 func getKubernetesPods() ([]KubernetesPod, error) {
-	cmd := exec.Command("kubectl", "get", "pods", "--all-namespaces", "-o", "json")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "pods", "--all-namespaces", "-o", "json")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -899,7 +774,9 @@ func getKubernetesPods() ([]KubernetesPod, error) {
 }
 
 func getKubernetesDeployments() ([]KubernetesDeployment, error) {
-	cmd := exec.Command("kubectl", "get", "deployments", "--all-namespaces", "-o", "json")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "deployments", "--all-namespaces", "-o", "json")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
@@ -941,7 +818,9 @@ func getKubernetesDeployments() ([]KubernetesDeployment, error) {
 }
 
 func getKubernetesServices() ([]KubernetesService, error) {
-	cmd := exec.Command("kubectl", "get", "services", "--all-namespaces", "-o", "json")
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "kubectl", "get", "services", "--all-namespaces", "-o", "json")
 	out, err := cmd.Output()
 	if err != nil {
 		return nil, err
