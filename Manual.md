@@ -981,6 +981,105 @@ The Terraform integration works seamlessly with the main Azure TUI interface:
 
 ---
 
+## Azure DevOps Integration 🔄
+
+Azure TUI includes a comprehensive DevOps integration module for managing Azure DevOps organizations, projects, and pipelines through a popup-based interface.
+
+### Key Features
+
+- **Organization Management**: List and switch between Azure DevOps organizations
+- **Project Navigation**: Browse projects within organizations  
+- **Pipeline Discovery**: List all build and release pipelines
+- **Pipeline Operations**: View pipeline details, runs, and history
+- **Real-time Status**: Monitor pipeline execution status
+- **Tree-based Interface**: Hierarchical view of DevOps resources
+
+### Configuration
+
+#### Environment Variables
+```bash
+# Required: Personal Access Token
+export AZURE_DEVOPS_PAT="your-personal-access-token"
+
+# Optional: Default organization and project
+export AZURE_DEVOPS_ORG="your-organization"
+export AZURE_DEVOPS_PROJECT="your-project"
+```
+
+#### Config File Setup
+Add to `~/.config/azure-tui/config.yaml`:
+```yaml
+devops:
+  organization: "your-organization"
+  project: "your-project"  
+  base_url: "https://dev.azure.com"
+```
+
+### Personal Access Token Setup
+
+1. **Navigate to Azure DevOps**: Go to your organization settings
+2. **Create Token**: User Settings → Personal Access Tokens → New Token
+3. **Set Permissions**:
+   - **Build**: Read & execute
+   - **Release**: Read, write & execute
+   - **Project and Team**: Read
+   - **Identity**: Read
+4. **Configure**: Copy token and set `AZURE_DEVOPS_PAT` environment variable
+
+### DevOps Module Features
+
+#### Organization & Project Management
+- List available Azure DevOps organizations
+- Browse projects within selected organization
+- Switch between different organizations/projects
+- Display project metadata and status
+
+#### Pipeline Management
+- Discover all build and release pipelines
+- Filter pipelines by name, status, or recent activity
+- Display pipeline information (name, repository, last run)
+- Monitor pipeline execution status
+
+#### Pipeline Operations
+- View detailed pipeline configuration
+- Check recent run history and results
+- Monitor active pipeline executions
+- Access pipeline logs and artifacts
+
+### Usage Examples
+
+#### Daily DevOps Workflow
+1. **Morning Stand-up**: Check pipeline status across projects
+2. **Build Monitoring**: Monitor active deployments and releases
+3. **Project Review**: Review pipeline health across teams
+4. **Release Management**: Track release pipeline execution
+
+#### Pipeline Management
+1. **Pipeline Discovery**: Find pipelines across multiple projects
+2. **Status Monitoring**: Real-time pipeline execution tracking
+3. **History Review**: Check recent runs and failure patterns
+4. **Cross-Project View**: Monitor pipelines across organizations
+
+### Integration Architecture
+
+The DevOps integration follows the same pattern as Terraform integration:
+- **Popup-based Interface**: Clean, borderless popup overlay
+- **Hierarchical Navigation**: Tree-based organization → project → pipeline structure
+- **Keyboard-driven**: Arrow keys for navigation, Enter to select, Esc to exit
+- **Real-time Data**: Live status updates and pipeline information
+
+### Future Enhancements
+
+The DevOps integration is designed for future expansion:
+- **Pipeline Triggering**: Start builds and releases from TUI
+- **Approval Management**: Handle deployment approvals
+- **Work Item Integration**: Link builds to work items and PRs
+- **Dashboard Integration**: DevOps metrics in main TUI dashboard
+
+**Note**: DevOps integration is currently available as a standalone module. Future versions will include direct keyboard shortcut access from the main TUI interface.
+
+---
+
 ## Advanced Features
 
 ### Configuration Management
@@ -1007,6 +1106,11 @@ interface:
   theme: "azure"
   show_icons: true
   auto_refresh: 300  # seconds
+  
+devops:
+  organization: "your-organization"
+  project: "your-project"
+  base_url: "https://dev.azure.com"
   
 shortcuts:
   custom:

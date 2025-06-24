@@ -13,6 +13,7 @@ A modern, **NeoVim-style Terminal User Interface** for managing Azure resources 
 - **📊 Table-Formatted Properties**: Resource properties displayed in organized tables with intelligent formatting
 - **🔐 Enhanced SSH for VMs**: Direct SSH (`c`) and Bastion (`b`) connections with automatic IP detection
 - **🚢 Comprehensive AKS Management**: Full kubectl integration with pod (`p`), deployment (`D`), node (`n`), and service (`v`) management
+- **🔄 Azure DevOps Integration**: Complete pipeline management module with build/release monitoring, run triggering, and organization navigation (configuration available)
 - **⚡ Real-time Actions**: Start (`s`), stop (`S`), restart (`r`) operations with visual feedback
 - **🎮 Intuitive Controls**: Enhanced keyboard shortcuts and visual indicators for all operations
 
@@ -130,6 +131,11 @@ DEMO_MODE=true ./aztui
 export AZURE_SUBSCRIPTION_ID="your-subscription-id"
 export AZURE_TENANT_ID="your-tenant-id"
 
+# Azure DevOps Integration (optional)
+export AZURE_DEVOPS_PAT="your-personal-access-token"
+export AZURE_DEVOPS_ORG="your-organization"
+export AZURE_DEVOPS_PROJECT="your-project"
+
 # AI Integration (Choose one)
 # Option 1: OpenAI API
 export OPENAI_API_KEY="your-openai-api-key"
@@ -160,7 +166,55 @@ ai:
 interface:
   default_mode: "tree"  # or "traditional"
   theme: "azure"
+
+# Azure DevOps Integration (optional)
+devops:
+  organization: "your-organization"
+  project: "your-project"
+  base_url: "https://dev.azure.com"
 ```
+
+---
+
+## 🔄 Azure DevOps Integration
+
+Azure TUI includes a comprehensive DevOps integration module for managing Azure DevOps organizations, projects, and pipelines.
+
+### Setup
+```bash
+# Required: Personal Access Token with appropriate permissions
+export AZURE_DEVOPS_PAT="your-personal-access-token"
+
+# Optional: Default organization and project
+export AZURE_DEVOPS_ORG="your-organization"
+export AZURE_DEVOPS_PROJECT="your-project"
+```
+
+### Features
+- **Organization Management**: List and switch between Azure DevOps organizations
+- **Project Navigation**: Browse projects within organizations
+- **Pipeline Discovery**: List all build and release pipelines
+- **Pipeline Operations**: View pipeline details, runs, and history
+- **Real-time Status**: Monitor pipeline execution status
+- **Tree-based Interface**: Hierarchical view of DevOps resources
+
+### Personal Access Token Setup
+1. Go to **Azure DevOps** → **User Settings** → **Personal Access Tokens**
+2. Create a new token with the following permissions:
+   - **Build**: Read & execute
+   - **Release**: Read, write & execute  
+   - **Project and Team**: Read
+   - **Identity**: Read
+3. Copy the token and set the `AZURE_DEVOPS_PAT` environment variable
+
+### Usage
+The DevOps integration provides a borderless, popup-based interface similar to the Terraform integration, allowing you to:
+- Navigate organizations and projects with arrow keys
+- View pipeline information and recent runs
+- Monitor build and release status
+- Filter pipelines by name or status
+
+**Note**: DevOps integration is currently available as a standalone module. Future versions will include keyboard shortcut access from the main TUI interface.
 
 ---
 
