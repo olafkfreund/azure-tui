@@ -108,6 +108,10 @@ DEMO_MODE=true ./aztui
 - **Cost Analysis**: `O` - Get optimization suggestions
 - **Delete Resource**: `Ctrl+D` - Safe deletion with confirmation
 
+### Infrastructure Management
+- **Terraform Manager**: `Ctrl+T` - Open Terraform integration popup
+- **DevOps Manager**: `Ctrl+O` - Open Azure DevOps integration popup
+
 ### Storage Management (when Storage Account selected)
 - **List Containers**: `T` - Show all containers with progress tracking
 - **Create Container**: `Shift+T` - Create a new blob container
@@ -214,7 +218,15 @@ The DevOps integration provides a borderless, popup-based interface similar to t
 - Monitor build and release status
 - Filter pipelines by name or status
 
-**Note**: DevOps integration is currently available as a standalone module. Future versions will include keyboard shortcut access from the main TUI interface.
+**Access**: Press `Ctrl+O` from anywhere in the main TUI interface to open the Azure DevOps Manager popup.
+
+### Navigation
+- **Open DevOps Manager**: `Ctrl+O` - Access DevOps popup from main interface
+- **Navigate Menu**: `↑/↓` or `j/k` - Move through DevOps options
+- **Select Operation**: `Enter` - Execute selected DevOps operation
+- **View Results**: `j/k` - Scroll through operation results
+- **Go Back**: `Esc` - Return to previous menu or close popup
+- **Help**: `?` - Show all shortcuts (includes DevOps section)
 
 ---
 

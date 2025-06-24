@@ -15,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/olafkfreund/azure-tui/internal/azure/aci"
+	"github.com/olafkfreund/azure-tui/internal/azure/devops"
 	"github.com/olafkfreund/azure-tui/internal/azure/keyvault"
 	"github.com/olafkfreund/azure-tui/internal/azure/network"
 	"github.com/olafkfreund/azure-tui/internal/azure/resourceactions"
@@ -178,6 +179,19 @@ type terraformOperationMsg struct {
 	success   bool
 }
 
+// DevOps message types
+type devopsOrganizationsLoadedMsg struct {
+	organizations []devops.Organization
+}
+type devopsPipelinesLoadedMsg struct {
+	pipelines []devops.Pipeline
+}
+type devopsOperationMsg struct {
+	operation string
+	result    string
+	success   bool
+}
+
 // Settings message types
 type settingsFoldersLoadedMsg struct {
 	folders []string
@@ -328,6 +342,17 @@ type model struct {
 	terraformAnalysis     string
 	terraformMenuAction   string // Track the original menu action for folder selection
 	terraformScrollOffset int    // For scrolling through long analysis text
+
+	// DevOps integration
+	showDevOpsPopup     bool
+	devopsMenuIndex     int
+	devopsMode          string // "menu", "organizations", "projects", "pipelines", "operations"
+	devopsMenuOptions   []string
+	devopsOrganizations []devops.Organization
+	devopsPipelines     []devops.Pipeline
+	devopsScrollOffset  int // For scrolling through long content
+	devopsResult        string
+	devopsManager       *devops.DevOpsManager
 
 	// Settings menu functionality
 	showSettingsPopup     bool
@@ -682,6 +707,68 @@ func (m *model) handleTerraformDeploymentSelection() (tea.Model, tea.Cmd) {
 		m.terraformMode = "menu"
 		m.terraformMenuIndex = 0
 		return *m, nil
+	}
+	return *m, nil
+}
+
+// handleDevOpsMenuSelection handles the selection from the DevOps menu
+func (m *model) handleDevOpsMenuSelection() (tea.Model, tea.Cmd) {
+	switch m.devopsMode {
+	case "menu":
+		switch m.devopsMenuIndex {
+		case 0: // Browse Organizations
+			m.devopsMode = "organizations"
+			m.devopsMenuIndex = 0
+			return *m, loadDevOpsOrganizationsCmd()
+		case 1: // List Projects
+			if len(m.devopsOrganizations) > 0 {
+				// Use first organization for now - could be made interactive
+				orgName := m.devopsOrganizations[0].Name
+				return *m, executeDevOpsOperationCmd("list-projects", orgName)
+			} else {
+				// Load organizations first
+				return *m, loadDevOpsOrganizationsCmd()
+			}
+		case 2: // View Pipelines
+			if len(m.devopsOrganizations) > 0 {
+				// Use first organization for now - could be made interactive
+				orgName := m.devopsOrganizations[0].Name
+				return *m, executeDevOpsOperationCmd("list-pipelines", orgName)
+			} else {
+				// Load organizations first
+				return *m, loadDevOpsOrganizationsCmd()
+			}
+		case 3: // Pipeline Operations
+			if len(m.devopsOrganizations) > 0 {
+				// Use first organization for now - could be made interactive
+				orgName := m.devopsOrganizations[0].Name
+				return *m, executeDevOpsOperationCmd("analytics", orgName)
+			} else {
+				// Load organizations first
+				return *m, loadDevOpsOrganizationsCmd()
+			}
+		case 4: // DevOps Analytics
+			if len(m.devopsOrganizations) > 0 {
+				// Use first organization for now - could be made interactive
+				orgName := m.devopsOrganizations[0].Name
+				return *m, analyzeDevOpsOrganizationCmd(orgName)
+			} else {
+				// Load organizations first
+				return *m, loadDevOpsOrganizationsCmd()
+			}
+		}
+	case "organizations":
+		if m.devopsMenuIndex < len(m.devopsOrganizations) {
+			selectedOrg := m.devopsOrganizations[m.devopsMenuIndex]
+			// Load pipelines for selected organization
+			return *m, loadDevOpsPipelinesCmd(selectedOrg.Name)
+		}
+	case "pipelines":
+		if m.devopsMenuIndex < len(m.devopsPipelines) {
+			selectedPipeline := m.devopsPipelines[m.devopsMenuIndex]
+			// Could trigger pipeline or show details
+			m.logEntries = append(m.logEntries, fmt.Sprintf("Selected pipeline: %s", selectedPipeline.Name))
+		}
 	}
 	return *m, nil
 }
@@ -1652,6 +1739,39 @@ func (m model) getTerraformShortcuts() string {
 	return strings.Join(shortcuts, " ")
 }
 
+// getDevOpsShortcuts returns relevant shortcuts based on the current DevOps mode
+func (m model) getDevOpsShortcuts() string {
+	var shortcuts []string
+
+	switch m.devopsMode {
+	case "menu":
+		shortcuts = append(shortcuts, []string{
+			"↑/↓:Navigate", "Enter:Select", "Esc:Close",
+		}...)
+
+	case "organizations":
+		shortcuts = append(shortcuts, []string{
+			"↑/↓:Navigate", "Enter:Select", "Esc:Back",
+		}...)
+
+	case "pipelines":
+		shortcuts = append(shortcuts, []string{
+			"↑/↓:Navigate", "Enter:Select", "Esc:Back",
+		}...)
+
+	case "analysis", "operation":
+		shortcuts = append(shortcuts, []string{
+			"↑/↓:Scroll", "Enter:Back", "Esc:Close",
+		}...)
+	}
+
+	// Always available shortcuts
+	baseShortcuts := []string{"Ctrl+O:Menu", "?:Help"}
+	shortcuts = append(shortcuts, baseShortcuts...)
+
+	return strings.Join(shortcuts, " ")
+}
+
 // getSettingsShortcuts returns relevant shortcuts based on the current Settings mode
 func (m model) getSettingsShortcuts() string {
 	var shortcuts []string
@@ -1732,6 +1852,22 @@ func initModel() model {
 		terraformAnalysis:     "",
 		terraformMenuAction:   "",
 		terraformScrollOffset: 0,
+		// Initialize DevOps functionality
+		showDevOpsPopup: false,
+		devopsMenuIndex: 0,
+		devopsMode:      "menu",
+		devopsMenuOptions: []string{
+			"Browse Organizations",
+			"List Projects",
+			"View Pipelines",
+			"Pipeline Operations",
+			"DevOps Analytics",
+		},
+		devopsOrganizations: []devops.Organization{},
+		devopsPipelines:     []devops.Pipeline{},
+		devopsScrollOffset:  0,
+		devopsResult:        "",
+		devopsManager:       nil,
 		// Initialize Settings functionality
 		showSettingsPopup:     false,
 		settingsMenuIndex:     0,
@@ -2222,6 +2358,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Keep the popup open to show deployment options
 		}
 
+	// DevOps message handlers
+	case devopsOrganizationsLoadedMsg:
+		m.devopsOrganizations = msg.organizations
+		m.devopsMode = "organizations"
+		m.devopsMenuIndex = 0
+
+	case devopsPipelinesLoadedMsg:
+		m.devopsPipelines = msg.pipelines
+		m.devopsMode = "pipelines"
+		m.devopsMenuIndex = 0
+
+	case devopsOperationMsg:
+		m.actionInProgress = false
+		m.devopsResult = msg.result
+		m.devopsMode = "operation"
+		m.devopsScrollOffset = 0 // Reset scroll when loading new results
+
+		status := "Success"
+		if !msg.success {
+			status = "Failed"
+		}
+		m.logEntries = append(m.logEntries, fmt.Sprintf("DevOps %s: %s - %s", msg.operation, status, msg.result[:min(50, len(msg.result))]))
+
 	// Settings message handlers
 	case settingsFoldersLoadedMsg:
 		m.settingsFolders = msg.folders
@@ -2386,6 +2545,59 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 
+		// Handle DevOps popup navigation
+		if m.showDevOpsPopup {
+			switch msg.String() {
+			case "escape":
+				if m.devopsMode == "organizations" || m.devopsMode == "projects" || m.devopsMode == "pipelines" || m.devopsMode == "operations" {
+					// Go back to main DevOps menu
+					m.devopsMode = "menu"
+					m.devopsMenuIndex = 0
+					m.devopsScrollOffset = 0 // Reset scroll when going back to menu
+				} else {
+					m.showDevOpsPopup = false
+				}
+			case "enter":
+				if m.devopsMode == "organizations" || m.devopsMode == "projects" || m.devopsMode == "pipelines" {
+					// Go back to menu from content views
+					m.devopsMode = "menu"
+					m.devopsMenuIndex = 0
+					m.devopsScrollOffset = 0 // Reset scroll when going back to menu
+				} else if m.devopsMode == "operations" {
+					// Execute operation or go back to menu
+					m.devopsMode = "menu"
+					m.devopsMenuIndex = 0
+				} else {
+					return m.handleDevOpsMenuSelection()
+				}
+			case "j", "down":
+				if m.devopsMode == "menu" {
+					m.devopsMenuIndex = (m.devopsMenuIndex + 1) % len(m.devopsMenuOptions)
+				} else if m.devopsMode == "organizations" && len(m.devopsOrganizations) > 0 {
+					m.devopsMenuIndex = (m.devopsMenuIndex + 1) % len(m.devopsOrganizations)
+				} else if m.devopsMode == "pipelines" && len(m.devopsPipelines) > 0 {
+					m.devopsMenuIndex = (m.devopsMenuIndex + 1) % len(m.devopsPipelines)
+				} else if m.devopsMode == "operations" {
+					// Scroll down in operations result
+					m.devopsScrollOffset += 1
+				}
+			case "k", "up":
+				if m.devopsMode == "menu" {
+					m.devopsMenuIndex = (m.devopsMenuIndex - 1 + len(m.devopsMenuOptions)) % len(m.devopsMenuOptions)
+				} else if m.devopsMode == "organizations" && len(m.devopsOrganizations) > 0 {
+					m.devopsMenuIndex = (m.devopsMenuIndex - 1 + len(m.devopsOrganizations)) % len(m.devopsOrganizations)
+				} else if m.devopsMode == "pipelines" && len(m.devopsPipelines) > 0 {
+					m.devopsMenuIndex = (m.devopsMenuIndex - 1 + len(m.devopsPipelines)) % len(m.devopsPipelines)
+				} else if m.devopsMode == "operations" {
+					// Scroll up in operations result (prevent negative scroll)
+					if m.devopsScrollOffset > 0 {
+						m.devopsScrollOffset -= 1
+					}
+				}
+			}
+			return m, nil
+		}
+
 		// Handle Help popup navigation
 		if m.showHelpPopup {
 			switch msg.String() {
@@ -2470,6 +2682,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, loadTerraformFoldersCmd()
 			} else {
 				m.showTerraformPopup = false
+			}
+
+		// DevOps Integration - Primary Access Key
+		case "ctrl+o":
+			if !m.showDevOpsPopup {
+				m.showDevOpsPopup = true
+				m.devopsMenuIndex = 0
+				m.devopsMode = "menu"
+				return m, loadDevOpsOrganizationsCmd()
+			} else {
+				m.showDevOpsPopup = false
 			}
 
 		// Settings Menu - Primary Access Key
@@ -3104,6 +3327,16 @@ func (m model) View() string {
 		allSections = append(allSections, renderShortcutRow("", "• Create from templates"))
 		allSections = append(allSections, "")
 
+		// DevOps Management section
+		allSections = append(allSections, lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render("⚒️ DevOps Management:"))
+		allSections = append(allSections, "")
+		allSections = append(allSections, renderShortcutRow("Ctrl+O", "Open Azure DevOps Manager"))
+		allSections = append(allSections, renderShortcutRow("", "• Browse organizations"))
+		allSections = append(allSections, renderShortcutRow("", "• Manage projects"))
+		allSections = append(allSections, renderShortcutRow("", "• View pipelines"))
+		allSections = append(allSections, renderShortcutRow("", "• Execute operations"))
+		allSections = append(allSections, "")
+
 		// Container Management section
 		allSections = append(allSections, lipgloss.NewStyle().Bold(true).Foreground(colorPurple).Render("🐳 Container Management:"))
 		allSections = append(allSections, "")
@@ -3192,6 +3425,11 @@ func (m model) View() string {
 	// Render Subscription popup if active
 	if m.showSubscriptionPopup {
 		return m.renderSubscriptionPopup(fullView)
+	}
+
+	// Render DevOps popup if active
+	if m.showDevOpsPopup {
+		return m.renderDevOpsPopup(fullView)
 	}
 
 	return lipgloss.NewStyle().Background(bgDark).Render(fullView)
@@ -3542,6 +3780,167 @@ func (m model) renderSubscriptionPopup(background string) string {
 		content.WriteString(lipgloss.NewStyle().Italic(true).Foreground(colorGray).Render("Please wait..."))
 	case "menu":
 		content.WriteString(lipgloss.NewStyle().Italic(true).Foreground(colorGray).Render("Select a subscription to switch context"))
+	}
+
+	// Create popup style - clean, no borders or backgrounds
+	popupStyle := lipgloss.NewStyle().
+		Foreground(fgLight).
+		Padding(1, 2).
+		Width(70).
+		Align(lipgloss.Center, lipgloss.Top)
+
+	styledPopup := popupStyle.Render(content.String())
+
+	// Overlay on background
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, styledPopup)
+}
+
+func (m model) renderDevOpsPopup(background string) string {
+	var content strings.Builder
+
+	// Title
+	title := lipgloss.NewStyle().Bold(true).Foreground(colorBlue).Render("⚒️  Azure DevOps Manager")
+	content.WriteString(title)
+	content.WriteString("\n\n")
+
+	switch m.devopsMode {
+	case "menu":
+		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("Select an option:"))
+		content.WriteString("\n\n")
+
+		for i, option := range m.devopsMenuOptions {
+			style := lipgloss.NewStyle().Foreground(fgMedium)
+			if i == m.devopsMenuIndex {
+				style = style.Foreground(fgLight).Bold(true)
+			}
+			prefix := "  "
+			if i == m.devopsMenuIndex {
+				prefix = "▶ "
+			}
+			content.WriteString(style.Render(prefix + option))
+			content.WriteString("\n")
+		}
+
+	case "organizations":
+		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("Available Organizations:"))
+		content.WriteString("\n\n")
+
+		if len(m.devopsOrganizations) == 0 {
+			content.WriteString(lipgloss.NewStyle().Foreground(colorYellow).Render("No organizations found"))
+			content.WriteString("\n")
+			content.WriteString(lipgloss.NewStyle().Faint(true).Render("Check your Azure DevOps access permissions"))
+		} else {
+			for i, org := range m.devopsOrganizations {
+				style := lipgloss.NewStyle().Foreground(fgMedium)
+				if i == m.devopsMenuIndex {
+					style = style.Foreground(fgLight).Bold(true)
+				}
+				prefix := "  "
+				if i == m.devopsMenuIndex {
+					prefix = "▶ "
+				}
+				content.WriteString(style.Render(prefix + "🏢 " + org.Name))
+				content.WriteString("\n")
+				if i == m.devopsMenuIndex {
+					content.WriteString(style.Render(fmt.Sprintf("   URL: %s", org.URL)))
+					content.WriteString("\n")
+				}
+			}
+		}
+
+	case "projects":
+		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("DevOps Projects:"))
+		content.WriteString("\n\n")
+		content.WriteString(lipgloss.NewStyle().Faint(true).Render("Project listing functionality coming soon..."))
+
+	case "pipelines":
+		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("Available Pipelines:"))
+		content.WriteString("\n\n")
+
+		if len(m.devopsPipelines) == 0 {
+			content.WriteString(lipgloss.NewStyle().Foreground(colorYellow).Render("No pipelines found"))
+			content.WriteString("\n")
+			content.WriteString(lipgloss.NewStyle().Faint(true).Render("Check your project access or create a pipeline"))
+		} else {
+			for i, pipeline := range m.devopsPipelines {
+				style := lipgloss.NewStyle().Foreground(fgMedium)
+				if i == m.devopsMenuIndex {
+					style = style.Foreground(fgLight).Bold(true)
+				}
+				prefix := "  "
+				if i == m.devopsMenuIndex {
+					prefix = "▶ "
+				}
+				content.WriteString(style.Render(prefix + "🔧 " + pipeline.Name))
+				content.WriteString("\n")
+				if i == m.devopsMenuIndex {
+					content.WriteString(style.Render(fmt.Sprintf("   Path: %s", pipeline.Path)))
+					content.WriteString("\n")
+					content.WriteString(style.Render(fmt.Sprintf("   Type: %s", pipeline.Type)))
+					content.WriteString("\n")
+				}
+			}
+		}
+
+	case "operations":
+		content.WriteString(lipgloss.NewStyle().Bold(true).Foreground(colorGreen).Render("DevOps Operations Result:"))
+		content.WriteString("\n\n")
+
+		// Apply scrolling to the operations result
+		resultLines := strings.Split(m.devopsResult, "\n")
+
+		// Calculate visible lines (popup height - header - footer - status bar)
+		visibleLines := 15 // Reasonable default for popup content
+
+		// Apply scroll offset
+		startLine := m.devopsScrollOffset
+		endLine := min(startLine+visibleLines, len(resultLines))
+
+		// Ensure we don't scroll past the beginning
+		if startLine >= len(resultLines) {
+			startLine = max(0, len(resultLines)-visibleLines)
+			m.devopsScrollOffset = startLine
+		}
+
+		// Add scroll indicators
+		if startLine > 0 {
+			content.WriteString(lipgloss.NewStyle().Foreground(colorGray).Render("↑ (more content above - use k/↑ to scroll up)\n"))
+		}
+
+		// Render visible lines
+		for i := startLine; i < endLine; i++ {
+			if i < len(resultLines) {
+				content.WriteString(resultLines[i])
+				content.WriteString("\n")
+			}
+		}
+
+		// Add scroll indicator at bottom
+		if endLine < len(resultLines) {
+			content.WriteString(lipgloss.NewStyle().Foreground(colorGray).Render("↓ (more content below - use j/↓ to scroll down)"))
+		}
+	}
+
+	content.WriteString("\n\n")
+
+	// Add status bar with contextual shortcuts
+	shortcuts := m.getDevOpsShortcuts()
+	statusbarStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color("4")).
+		Foreground(lipgloss.Color("15")).
+		Bold(true).
+		Padding(0, 1).
+		Width(58)
+
+	content.WriteString(statusbarStyle.Render("DevOps: " + shortcuts))
+	content.WriteString("\n")
+
+	// Footer text based on mode
+	switch m.devopsMode {
+	case "operations":
+		content.WriteString(lipgloss.NewStyle().Italic(true).Foreground(colorGray).Render("Press Enter or Esc to return to menu"))
+	default:
+		content.WriteString(lipgloss.NewStyle().Italic(true).Foreground(colorGray).Render("Navigate: ↑/↓  Select: Enter  Back: Esc"))
 	}
 
 	// Create popup style - clean, no borders or backgrounds
@@ -4794,6 +5193,191 @@ func copyTemplateFiles(src, dst string) error {
 	}
 
 	return nil
+}
+
+// =============================================================================
+// DEVOPS MANAGEMENT COMMANDS
+// =============================================================================
+
+// loadDevOpsOrganizationsCmd loads available DevOps organizations
+func loadDevOpsOrganizationsCmd() tea.Cmd {
+	return func() tea.Msg {
+		// Create DevOps config
+		config := devops.DefaultConfig()
+		if config.PersonalAccessToken == "" {
+			return errorMsg{error: "DevOps PAT not configured. Please set AZURE_DEVOPS_PAT environment variable"}
+		}
+
+		// Create client and get organizations
+		client := devops.NewDevOpsClient(config)
+		organizations, err := client.ListOrganizations()
+		if err != nil {
+			return errorMsg{error: fmt.Sprintf("Failed to load DevOps organizations: %v", err)}
+		}
+		return devopsOrganizationsLoadedMsg{organizations: organizations}
+	}
+}
+
+// loadDevOpsPipelinesCmd loads pipelines for the selected organization
+func loadDevOpsPipelinesCmd(organizationName string) tea.Cmd {
+	return func() tea.Msg {
+		config := devops.DefaultConfig()
+		config.Organization = organizationName
+
+		client := devops.NewDevOpsClient(config)
+
+		// Get both build and release pipelines
+		var allPipelines []devops.Pipeline
+
+		buildPipelines, err := client.ListBuildPipelines()
+		if err == nil {
+			allPipelines = append(allPipelines, buildPipelines...)
+		}
+
+		releasePipelines, err := client.ListReleasePipelines()
+		if err == nil {
+			allPipelines = append(allPipelines, releasePipelines...)
+		}
+
+		if len(allPipelines) == 0 && err != nil {
+			return errorMsg{error: fmt.Sprintf("Failed to load pipelines: %v", err)}
+		}
+
+		return devopsPipelinesLoadedMsg{pipelines: allPipelines}
+	}
+}
+
+// analyzeDevOpsOrganizationCmd analyzes a DevOps organization
+func analyzeDevOpsOrganizationCmd(organizationName string) tea.Cmd {
+	return func() tea.Msg {
+		analysis := fmt.Sprintf("🏢 DevOps Organization Analysis: %s\n\n", organizationName)
+
+		config := devops.DefaultConfig()
+		config.Organization = organizationName
+		client := devops.NewDevOpsClient(config)
+
+		// Get organization details
+		organizations, err := client.ListOrganizations()
+		if err == nil {
+			for _, org := range organizations {
+				if org.Name == organizationName {
+					analysis += fmt.Sprintf("Organization: %s\n", org.Name)
+					analysis += fmt.Sprintf("Description: %s\n", org.Description)
+					analysis += fmt.Sprintf("URL: %s\n\n", org.URL)
+					break
+				}
+			}
+		}
+
+		// Get projects count
+		projects, projErr := client.ListProjects()
+		if projErr == nil {
+			analysis += fmt.Sprintf("Projects: %d total\n", len(projects))
+			for _, project := range projects {
+				analysis += fmt.Sprintf("• %s - %s\n", project.Name, project.Description)
+			}
+			analysis += "\n"
+		}
+
+		// Get pipelines overview
+		buildPipelines, buildErr := client.ListBuildPipelines()
+		releasePipelines, releaseErr := client.ListReleasePipelines()
+
+		totalPipelines := 0
+		if buildErr == nil {
+			totalPipelines += len(buildPipelines)
+		}
+		if releaseErr == nil {
+			totalPipelines += len(releasePipelines)
+		}
+
+		if totalPipelines > 0 {
+			analysis += fmt.Sprintf("Pipelines: %d total\n", totalPipelines)
+			if buildErr == nil {
+				analysis += fmt.Sprintf("• Build pipelines: %d\n", len(buildPipelines))
+			}
+			if releaseErr == nil {
+				analysis += fmt.Sprintf("• Release pipelines: %d\n", len(releasePipelines))
+			}
+		}
+
+		return devopsOperationMsg{
+			operation: "analysis",
+			result:    analysis,
+			success:   true,
+		}
+	}
+}
+
+// executeDevOpsOperationCmd executes various DevOps operations
+func executeDevOpsOperationCmd(operation string, organizationName string) tea.Cmd {
+	return func() tea.Msg {
+		var result string
+		var err error
+
+		config := devops.DefaultConfig()
+		config.Organization = organizationName
+		client := devops.NewDevOpsClient(config)
+
+		switch operation {
+		case "list-projects":
+			projects, projectsErr := client.ListProjects()
+			if projectsErr != nil {
+				err = projectsErr
+			} else {
+				result = fmt.Sprintf("📁 Projects in %s (%d total):\n\n", organizationName, len(projects))
+				for _, project := range projects {
+					result += fmt.Sprintf("• %s\n", project.Name)
+					result += fmt.Sprintf("  Description: %s\n", project.Description)
+					result += fmt.Sprintf("  State: %s\n\n", project.State)
+				}
+			}
+		case "list-pipelines":
+			buildPipelines, buildErr := client.ListBuildPipelines()
+			releasePipelines, releaseErr := client.ListReleasePipelines()
+
+			var allPipelines []devops.Pipeline
+			if buildErr == nil {
+				allPipelines = append(allPipelines, buildPipelines...)
+			}
+			if releaseErr == nil {
+				allPipelines = append(allPipelines, releasePipelines...)
+			}
+
+			if len(allPipelines) == 0 && (buildErr != nil || releaseErr != nil) {
+				err = fmt.Errorf("failed to load pipelines")
+			} else {
+				result = fmt.Sprintf("🔧 Pipelines in %s (%d total):\n\n", organizationName, len(allPipelines))
+				for _, pipeline := range allPipelines {
+					result += fmt.Sprintf("• %s (ID: %d)\n", pipeline.Name, pipeline.ID)
+					result += fmt.Sprintf("  Path: %s\n", pipeline.Path)
+					result += fmt.Sprintf("  Type: %s\n", pipeline.Type)
+					result += fmt.Sprintf("  Status: %s\n\n", pipeline.Status)
+				}
+			}
+		case "analytics":
+			result = fmt.Sprintf("📊 DevOps Analytics for %s:\n\n", organizationName)
+			result += "This feature analyzes your DevOps organization metrics:\n"
+			result += "• Pipeline success rates\n"
+			result += "• Build frequency\n"
+			result += "• Release deployment trends\n"
+			result += "• Team productivity metrics\n\n"
+			result += "Analytics integration coming soon!"
+		default:
+			err = fmt.Errorf("unknown DevOps operation: %s", operation)
+		}
+
+		success := err == nil
+		if err != nil {
+			result = fmt.Sprintf("❌ %s failed: %v", operation, err)
+		}
+
+		return devopsOperationMsg{
+			operation: operation,
+			result:    result,
+			success:   success,
+		}
+	}
 }
 
 // =============================================================================

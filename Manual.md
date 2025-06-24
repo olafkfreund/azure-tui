@@ -1026,6 +1026,18 @@ devops:
    - **Identity**: Read
 4. **Configure**: Copy token and set `AZURE_DEVOPS_PAT` environment variable
 
+### Accessing DevOps Manager
+
+The Azure DevOps integration is now fully integrated into the main TUI interface:
+
+**Keyboard Access**: Press `Ctrl+O` from anywhere in the main interface to open the Azure DevOps Manager popup.
+
+**Navigation**: 
+- Use `↑/↓` or `j/k` to navigate through DevOps menu options
+- Press `Enter` to select and execute operations
+- Use `Esc` to go back to previous menu or close the popup
+- Press `?` for help (includes DevOps shortcuts)
+
 ### DevOps Module Features
 
 #### Organization & Project Management
@@ -1076,7 +1088,7 @@ The DevOps integration is designed for future expansion:
 - **Work Item Integration**: Link builds to work items and PRs
 - **Dashboard Integration**: DevOps metrics in main TUI dashboard
 
-**Note**: DevOps integration is currently available as a standalone module. Future versions will include direct keyboard shortcut access from the main TUI interface.
+**Note**: DevOps integration is now fully integrated with direct keyboard shortcut access (`Ctrl+O`) from the main TUI interface.
 
 ---
 
@@ -1158,6 +1170,7 @@ ai:
 | | `Ctrl+W` | Close Tab | Close current content tab |
 | **Actions** | `a` | AI Analysis | Get AI insights (manual trigger by default) |
 | | `Ctrl+T` | Terraform Manager | Open Terraform integration |
+| | `Ctrl+O` | DevOps Manager | Open Azure DevOps integration |
 | | `M` | Metrics | Show performance dashboard |
 | | `E` | Edit | Resource configuration editor |
 | | `T` | List Containers | List storage containers (Storage Accounts) |
