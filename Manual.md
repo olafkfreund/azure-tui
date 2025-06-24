@@ -732,123 +732,219 @@ Network Profile:
 
 ---
 
-## Terraform Integration 🏗️
+## Enhanced Terraform Integration 🏗️
 
-Azure TUI includes a comprehensive Terraform integration that allows you to manage Infrastructure as Code directly from the TUI interface. Access it with `Ctrl+T`.
+Azure TUI includes a **comprehensive Terraform management suite** that allows you to manage Infrastructure as Code directly from the TUI interface. Access it with `Ctrl+T`.
 
-### Key Features
+### ✨ **Enhanced Features (Latest)**
 
-- **Project Discovery**: Automatically finds Terraform projects in your workspace
-- **Code Analysis**: Validates and analyzes Terraform configurations
-- **Operations**: Execute terraform init, plan, apply, validate, format, destroy
-- **Template Management**: Create new projects from predefined templates
-- **Editor Integration**: Open projects in your preferred editor (VS Code, vim, nvim)
+#### 🔍 **Visual State Management** (`s`)
+- **Interactive State Browser**: Browse and inspect Terraform state resources with a tree-like interface
+- **Resource Details**: View detailed properties, metadata, and attributes for each state resource
+- **Search & Filter**: Quickly find specific resources within large state files
+- **Dependency Mapping**: Visualize relationships between resources in your state
 
-### Available Templates
+#### 📊 **Interactive Plan Visualization** (`p`)
+- **Smart Plan Filtering**: Toggle between All/Create/Update/Delete views with `f` key
+- **Color-Coded Changes**: 🟢 Create, 🟡 Update, 🔴 Delete operations with clear visual indicators
+- **Detailed Diff View**: See exactly what will change in each resource
+- **Resource Impact Analysis**: Understand the scope and impact of planned changes
 
-Azure TUI includes production-ready Terraform templates for:
+#### 🌐 **Enhanced Workspace Management** (`w`)
+- **Workspace Navigator**: List all available Terraform workspaces with status indicators
+- **One-Click Switching**: Seamlessly switch between workspaces
+- **Current Workspace Highlighting**: Clear visual indication of active workspace
+- **Workspace Operations**: Create, select, and manage workspaces directly from the TUI
 
-- **Linux VMs**: Complete virtual machine setup with networking, security groups, and SSH access
-- **Azure Kubernetes Service (AKS)**: Managed Kubernetes clusters with monitoring and logging
-- **Azure SQL Server**: SQL Server instances with databases, security, and Key Vault integration
-- **Container Instances (ACI)**: Both single and multi-container deployments
-- **Multi-Container Apps**: Complex containerized applications with load balancing
+#### 🎯 **Advanced Operations**
+- **Dependency Viewer** (`d`): Visualize complex resource dependency graphs
+- **Target Operations** (`t`): Apply changes to specific resources only for precise deployments
+- **Approval Mode** (`a`): Toggle approval workflows for safer infrastructure operations
+- **Resource Targeting**: Focus operations on specific resources or modules
 
-### Real-World Examples
+### 🎮 **Enhanced Navigation & Controls**
 
-#### Example 1: Analyzing an Existing Terraform Project
+```bash
+# Enhanced Terraform Integration - New Keyboard Shortcuts
+Ctrl+T  - Open Terraform Manager (main access)
 
-**Scenario**: You have a Terraform project for a web application infrastructure and want to validate it.
+# Within Terraform Manager:
+s       - Visual State Management
+p       - Interactive Plan Visualization  
+w       - Enhanced Workspace Management
+d       - Show Dependencies
+f       - Filter Toggle (in plan view)
+a       - Approval Mode Toggle
+t       - Target Resource Operations
+
+# Standard navigation:
+↑/↓, j/k  - Navigate options
+Enter     - Select/Execute
+Esc       - Back/Close
+?         - Help
+```
+
+### 🚀 **Real-World Enhanced Examples**
+
+#### Example 1: **Visual State Inspection**
+
+**Scenario**: You need to understand the current state of your infrastructure before making changes.
 
 1. **Open Terraform Manager**: Press `Ctrl+T`
-2. **Select "Analyze Code"**: Navigate with ↑/↓, press Enter
-3. **Choose Project**: Select your web-app terraform folder
-4. **View Analysis**: See validation results and file structure
+2. **Access State Viewer**: Press `s` for Visual State Management
+3. **Browse Resources**: Navigate through state resources with `j/k`
+4. **Inspect Details**: Press `Enter` to view detailed resource properties
 
 **What you'll see**:
 ```
-📁 Terraform Project Analysis: ./web-app-infrastructure
+🔍 Terraform State Resources (15 total)
 
-✅ main.tf found
-✅ variables.tf found  
-✅ outputs.tf found
-❌ terraform.tf missing
+📦 azurerm_resource_group.main
+   ├── 📍 Location: East US
+   ├── 🏷️  Tags: environment=prod, project=webapp
+   └── 🆔 ID: /subscriptions/.../resourceGroups/webapp-prod
 
-🔍 Use Terraform operations to validate and manage this project.
+🖥️  azurerm_virtual_machine.web
+   ├── 📍 Location: East US  
+   ├── 💾 Size: Standard_B2s
+   ├── 🔌 Public IP: 20.124.45.67
+   └── 🔗 Dependencies: resource_group, network_interface
 ```
 
-#### Example 2: Creating a New AKS Cluster
+#### Example 2: **Interactive Plan Analysis**
 
-**Scenario**: You need to deploy a new Kubernetes cluster for a staging environment.
+**Scenario**: You want to review planned changes with filtering before applying.
 
-1. **Open Terraform Manager**: Press `Ctrl+T`
-2. **Create from Template**: Select "Create from Template"
-3. **Choose AKS Template**: Select the basic-aks template
-4. **Customize Variables**: Edit variables for your staging environment
+1. **Generate Plan**: Use standard Terraform operations to create a plan
+2. **Open Plan Viewer**: Press `p` for Interactive Plan Visualization
+3. **Filter Changes**: Press `f` to cycle through All → Create → Update → Delete views
+4. **Review Impact**: Examine each change type separately
 
-**Template includes**:
-- AKS cluster with system-assigned managed identity
-- Default node pool with configurable VM sizes
-- Azure Container Registry integration
-- Log Analytics workspace for monitoring
-- Network security groups and subnets
+**What you'll see**:
+```
+📊 Terraform Plan Analysis - Create Operations (3 of 8 changes)
 
-#### Example 3: Validating Multi-Container Application
+🟢 azurerm_storage_account.backup
+   └── Action: CREATE
+   └── 📍 Location: East US
+   └── 🔄 Replication: LRS
 
-**Scenario**: You're deploying a microservices application using Azure Container Instances.
+🟢 azurerm_app_service.api  
+   └── Action: CREATE
+   └── 📦 Resource Group: webapp-prod
+   └── 🎯 Runtime: dotnet|6.0
 
-1. **Navigate to Project**: Use file explorer or `Ctrl+T` → "Browse Folders"
-2. **Select multi-container project**: Choose your microservices folder
-3. **Run Validation**: Select "Terraform Operations" → Validate
-4. **Check Results**: Review validation output for errors
-
-**Multi-container template features**:
-- Web frontend (nginx) on port 80
-- API backend (custom app) on port 8080
-- Health checks and readiness probes
-- Environment variable configuration
-- Log Analytics integration
-
-#### Example 4: Infrastructure Code Review Workflow
-
-**Scenario**: Team code review process for infrastructure changes.
-
-1. **Analyze Code**: `Ctrl+T` → "Analyze Code" → Select project
-2. **Validate Syntax**: `Ctrl+T` → "Terraform Operations" → Select project → Validate
-3. **Format Code**: Run terraform format to ensure consistent styling
-4. **Open in Editor**: `Ctrl+T` → "Open External Editor" → Make changes
-5. **Re-validate**: Repeat validation after changes
-
-### Terraform Operations Walkthrough
-
-#### 1. Project Initialization
-```bash
-# What happens when you select "Terraform Operations" → Init
-terraform init
-# Downloads providers, initializes backend, prepares workspace
+🟢 azurerm_sql_database.main
+   └── Action: CREATE
+   └── 💾 Size: S1 (20 DTU)
+   └── 🔗 Server: webapp-sql-server
 ```
 
-#### 2. Planning Changes
-```bash
-# What happens when you select "Terraform Operations" → Plan  
-terraform plan
-# Shows what resources will be created, modified, or destroyed
+#### Example 3: **Workspace Management Workflow**
+
+**Scenario**: You need to switch between development and production workspaces.
+
+1. **Open Workspace Manager**: Press `w` for Enhanced Workspace Management
+2. **View All Workspaces**: See list with current workspace highlighted
+3. **Switch Workspace**: Select target workspace and confirm switch
+4. **Verify Context**: Confirm you're operating in the correct environment
+
+**What you'll see**:
+```
+🌐 Terraform Workspaces
+
+  development    (2 resources)
+► production     (15 resources) ✅ CURRENT
+  staging        (8 resources)
+  testing        (3 resources)
+
+💡 Select workspace and press Enter to switch
+🔄 Current: production → Target: development
 ```
 
-#### 3. Applying Infrastructure
-```bash
-# What happens when you select "Terraform Operations" → Apply
-terraform apply -auto-approve
-# Creates/updates infrastructure based on your configuration
+#### Example 4: **Dependency Analysis**
+
+**Scenario**: You need to understand resource dependencies before making targeted changes.
+
+1. **Access Dependency Viewer**: Press `d` for dependency visualization
+2. **Select Resource**: Choose a resource to analyze
+3. **View Dependencies**: See both upstream and downstream dependencies
+4. **Plan Changes**: Use insights for safer infrastructure modifications
+
+**What you'll see**:
+```
+🔗 Resource Dependencies
+
+📦 azurerm_virtual_machine.web
+   ⬆️  Depends on:
+   ├── azurerm_resource_group.main
+   ├── azurerm_network_interface.web
+   └── azurerm_availability_set.web
+
+   ⬇️  Dependencies:
+   ├── azurerm_virtual_machine_extension.monitoring
+   └── azurerm_backup_protected_vm.web
+
+⚠️  Impact: Changes to this resource will affect 2 dependent resources
 ```
 
-#### 4. Validation and Formatting
-```bash
-# Validation
-terraform validate
-# Checks syntax and configuration validity
+### 🏗️ **Traditional Features** (Still Available)
 
-# Formatting  
+#### Project Discovery & Analysis
+- **Automatic Detection**: Finds Terraform projects in your workspace
+- **Code Validation**: Validates and analyzes Terraform configurations  
+- **Operations**: Execute terraform init, plan, apply, validate, format, destroy
+- **Template Management**: Create new projects from predefined templates
+- **Editor Integration**: Open projects in VS Code, vim, nvim
+
+#### Available Templates
+- **Linux VMs**: Complete virtual machine setup with networking and security
+- **Azure Kubernetes Service (AKS)**: Managed Kubernetes clusters with monitoring
+- **Azure SQL Server**: Database instances with security and Key Vault integration
+- **Container Instances (ACI)**: Single and multi-container deployments
+- **Multi-Container Apps**: Complex applications with load balancing
+
+### 🎨 **Enhanced UI Design**
+
+- **Frameless Interface**: Consistent with Azure TUI's clean aesthetic
+- **Real-time Indicators**: Live status updates and progress feedback
+- **Color-Coded Operations**: Intuitive visual indicators for different actions
+- **Responsive Layout**: Adapts to terminal size and content
+- **Vim-Style Navigation**: Full keyboard navigation support
+
+### 🔧 **Enhanced Operations Walkthrough**
+
+#### 1. **State Resource Inspection**
+```bash
+# What happens when you press 's' (Visual State Management)
+terraform state list
+terraform state show <resource>
+# Parses and displays state resources with metadata
+```
+
+#### 2. **Plan Analysis with Filtering** 
+```bash
+# What happens when you press 'p' (Interactive Plan Visualization)
+terraform plan -out=tfplan -json
+# Analyzes plan output with smart filtering capabilities
+```
+
+#### 3. **Workspace Operations**
+```bash
+# What happens when you press 'w' (Enhanced Workspace Management)
+terraform workspace list
+terraform workspace show
+terraform workspace select <workspace>
+# Manages workspace context with visual feedback
+```
+
+#### 4. **Targeted Operations**
+```bash
+# What happens when you press 't' (Target Resource Operations)
+terraform plan -target=<resource>
+terraform apply -target=<resource>
+# Enables precise infrastructure changes
+```  
 terraform fmt
 # Ensures consistent code formatting
 ```
@@ -1169,7 +1265,7 @@ ai:
 | | `Shift+Tab` | Previous Tab | Switch to previous tab |
 | | `Ctrl+W` | Close Tab | Close current content tab |
 | **Actions** | `a` | AI Analysis | Get AI insights (manual trigger by default) |
-| | `Ctrl+T` | Terraform Manager | Open Terraform integration |
+| | `Ctrl+T` | Terraform Manager | Open enhanced Terraform integration |
 | | `Ctrl+O` | DevOps Manager | Open Azure DevOps integration |
 | | `M` | Metrics | Show performance dashboard |
 | | `E` | Edit | Resource configuration editor |
@@ -1180,6 +1276,13 @@ ai:
 | | `O` | Optimize | Cost optimization analysis |
 | | `Ctrl+X` | Delete Storage | Delete containers/blobs (Storage Accounts) |
 | | `Ctrl+D` | Delete | Safe resource deletion |
+| **Enhanced Terraform** | `s` | State Management | Visual Terraform state browser (within Terraform Manager) |
+| | `p` | Plan Viewer | Interactive plan visualization (within Terraform Manager) |
+| | `w` | Workspace Manager | Enhanced workspace management (within Terraform Manager) |
+| | `d` | Dependencies | Show resource dependencies (within Terraform Manager) |
+| | `f` | Filter Toggle | Cycle plan filters: All/Create/Update/Delete (within Plan Viewer) |
+| | `a` | Approval Mode | Toggle approval workflows (within Terraform Manager) |
+| | `t` | Target Operations | Apply changes to specific resources (within Terraform Manager) |
 | **Interface** | `F2` | Toggle Mode | Switch tree/traditional view |
 | | `?` | Help | Show shortcuts |
 | | `Esc` | Close | Close dialogs/popups |

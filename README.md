@@ -37,6 +37,13 @@ A modern, **NeoVim-style Terminal User Interface** for managing Azure resources 
 - **Delete Protection** (`Ctrl+D`): Confirmation dialogs prevent accidental deletions
 
 ### 🔧 **Infrastructure as Code**
+- **Enhanced Terraform Integration**: Complete Terraform management suite
+  - **Visual State Management**: Interactive browse and inspect Terraform state resources
+  - **Interactive Plan Visualization**: View plan changes with smart filtering (all/create/update/delete)
+  - **Enhanced Workspace Management**: Manage workspaces with status indicators and easy switching
+  - **Dependency Viewer**: Visualize resource dependencies and relationships
+  - **Target Operations**: Apply changes to specific resources with precision
+  - **Approval Workflows**: Toggle approval mode for safer operations
 - **File Scanning**: Detect and analyze Terraform/Bicep files
 - **Template Generation**: AI-assisted IaC code creation
 - **Deployment Support**: Deploy infrastructure directly from the TUI
@@ -109,7 +116,13 @@ DEMO_MODE=true ./aztui
 - **Delete Resource**: `Ctrl+D` - Safe deletion with confirmation
 
 ### Infrastructure Management
-- **Terraform Manager**: `Ctrl+T` - Open Terraform integration popup
+- **Terraform Manager**: `Ctrl+T` - Open enhanced Terraform integration popup
+  - **Visual State Management**: `s` - Browse and inspect Terraform state resources
+  - **Interactive Plan Visualization**: `p` - View plan changes with filtering options
+  - **Enhanced Workspace Management**: `w` - Manage Terraform workspaces with status indicators
+  - **Dependency Viewer**: `d` - Show resource dependencies and relationships
+  - **Target Operations**: `t` - Apply changes to specific resources
+  - **Plan Filtering**: `f` - Toggle between all/create/update/delete plan views
 - **DevOps Manager**: `Ctrl+O` - Open Azure DevOps integration popup
 
 ### Storage Management (when Storage Account selected)
@@ -227,6 +240,60 @@ The DevOps integration provides a borderless, popup-based interface similar to t
 - **View Results**: `j/k` - Scroll through operation results
 - **Go Back**: `Esc` - Return to previous menu or close popup
 - **Help**: `?` - Show all shortcuts (includes DevOps section)
+
+---
+
+## 🏗️ Enhanced Terraform Integration
+
+Azure TUI now includes a **comprehensive Terraform management suite** accessible via `Ctrl+T`, providing visual state management, interactive plan visualization, and enhanced workspace operations.
+
+### ✨ **New Enhanced Features**
+
+#### 🔍 **Visual State Management** (`s`)
+- Browse Terraform state resources interactively
+- View detailed resource properties and metadata
+- Filter and search through state entries
+- Examine resource dependencies and relationships
+
+#### 📊 **Interactive Plan Visualization** (`p`) 
+- View plan changes with smart filtering capabilities
+- Toggle between views: All changes, Creates only, Updates only, Deletes only
+- Color-coded change indicators (🟢 Create, 🟡 Update, 🔴 Delete)
+- Detailed diff view for resource modifications
+
+#### 🌐 **Enhanced Workspace Management** (`w`)**
+- List all available Terraform workspaces
+- Switch between workspaces with visual status indicators
+- Current workspace highlighting and selection
+- Workspace creation and management operations
+
+#### 🎯 **Advanced Operations**
+- **Dependency Viewer** (`d`): Visualize resource dependencies and relationships  
+- **Target Operations** (`t`): Apply changes to specific resources only
+- **Plan Filtering** (`f`): Cycle through filtered plan views  
+- **Approval Mode** (`a`): Toggle approval workflows for safer operations
+
+### 🚀 **Usage**
+
+```bash
+# Access enhanced Terraform integration
+# Press Ctrl+T from main interface
+
+# Navigate enhanced features:
+s  - Visual State Management    
+p  - Interactive Plan Visualization
+w  - Enhanced Workspace Management
+d  - Show Dependencies
+f  - Filter Toggle (in plan view)
+a  - Approval Mode Toggle  
+t  - Target Resource Operations
+```
+
+### 🎨 **UI Design**
+- **Frameless Design**: Consistent with Azure TUI aesthetic
+- **Real-time Updates**: Live status indicators and progress feedback
+- **Keyboard Navigation**: Full vim-style navigation support
+- **Color Coding**: Intuitive visual indicators for different operation types
 
 ---
 

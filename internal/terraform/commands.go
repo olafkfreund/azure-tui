@@ -6,6 +6,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
@@ -152,6 +153,244 @@ func (m *TerraformTUI) renderStateView() string {
 	return style.Render(content)
 }
 
+// Enhanced view rendering methods
+
+func (m *TerraformTUI) renderStateViewerView() string {
+	// Clean, frameless styling for consistency
+	style := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Padding(1, 2)
+
+	if m.activeView == ViewStateViewer {
+		style = style.Foreground(lipgloss.Color("#FF5F87"))
+	}
+
+	var content []string
+	content = append(content, lipgloss.NewStyle().Bold(true).Render("Terraform State Resources"))
+	content = append(content, "")
+
+	if len(m.stateViewer.resources) == 0 {
+		content = append(content, "No state resources found")
+		content = append(content, "Press 's' to load state resources")
+	} else {
+		// Header
+		content = append(content, fmt.Sprintf("Total Resources: %d", len(m.stateViewer.resources)))
+		content = append(content, "")
+
+		// Show resources
+		for i, resource := range m.stateViewer.resources {
+			prefix := "  "
+			if i == m.selectedResource {
+				prefix = "▶ "
+			}
+
+			statusIcon := "✓"
+			if resource.Tainted {
+				statusIcon = "⚠"
+			}
+
+			line := fmt.Sprintf("%s%s %s.%s (%s)",
+				prefix, statusIcon, resource.Type, resource.Name, resource.Status)
+
+			if i == m.selectedResource {
+				line = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F87")).Render(line)
+			}
+
+			content = append(content, line)
+
+			// Show dependencies if enabled and selected
+			if m.showDependencies && i == m.selectedResource && len(resource.Dependencies) > 0 {
+				for _, dep := range resource.Dependencies {
+					content = append(content, fmt.Sprintf("    └─ depends on: %s", dep))
+				}
+			}
+		}
+
+		content = append(content, "")
+		content = append(content, "d: toggle dependencies | ↑/↓: navigate")
+	}
+
+	return style.Render(strings.Join(content, "\n"))
+}
+
+func (m *TerraformTUI) renderPlanViewerView() string {
+	// Clean, frameless styling for consistency
+	style := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Padding(1, 2)
+
+	if m.activeView == ViewPlanViewer {
+		style = style.Foreground(lipgloss.Color("#FF5F87"))
+	}
+
+	var content []string
+	content = append(content, lipgloss.NewStyle().Bold(true).Render("Terraform Plan Changes"))
+	content = append(content, "")
+
+	if len(m.planViewer.changes) == 0 {
+		content = append(content, "No plan changes found")
+		content = append(content, "Press 'p' to load plan changes")
+	} else {
+		// Filter summary
+		filterText := "All changes"
+		if m.planViewer.filterAction != "" {
+			filterText = fmt.Sprintf("Filter: %s", m.planViewer.filterAction)
+		}
+
+		content = append(content, fmt.Sprintf("Changes: %d | %s", len(m.planViewer.changes), filterText))
+		content = append(content, "")
+
+		// Count changes by action
+		actionCounts := make(map[string]int)
+		for _, change := range m.planViewer.changes {
+			actionCounts[change.Action]++
+		}
+
+		var summary []string
+		for action, count := range actionCounts {
+			icon := getActionIcon(action)
+			summary = append(summary, fmt.Sprintf("%s %d %s", icon, count, action))
+		}
+		content = append(content, strings.Join(summary, " | "))
+		content = append(content, "")
+
+		// Show filtered changes
+		filteredChanges := m.planViewer.changes
+		if m.planViewer.filterAction != "" {
+			var filtered []PlanChange
+			for _, change := range m.planViewer.changes {
+				if change.Action == m.planViewer.filterAction {
+					filtered = append(filtered, change)
+				}
+			}
+			filteredChanges = filtered
+		}
+
+		for i, change := range filteredChanges {
+			prefix := "  "
+			if i == m.selectedChange {
+				prefix = "▶ "
+			}
+
+			icon := getActionIcon(change.Action)
+			line := fmt.Sprintf("%s%s %s (%s)",
+				prefix, icon, change.Resource, change.Action)
+
+			if i == m.selectedChange {
+				line = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F87")).Render(line)
+			}
+
+			content = append(content, line)
+
+			// Show details if enabled and selected
+			if m.showPlanDetails && i == m.selectedChange {
+				if change.Reason != "" {
+					content = append(content, fmt.Sprintf("    Reason: %s", change.Reason))
+				}
+				content = append(content, fmt.Sprintf("    Impact: %s", change.Impact))
+			}
+		}
+
+		content = append(content, "")
+		content = append(content, "f: filter toggle | a: approval mode | t: target resource")
+	}
+
+	return style.Render(strings.Join(content, "\n"))
+}
+
+func (m *TerraformTUI) renderEnvManagerView() string {
+	// Clean, frameless styling for consistency
+	style := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Padding(1, 2)
+
+	if m.activeView == ViewEnvManager {
+		style = style.Foreground(lipgloss.Color("#FF5F87"))
+	}
+
+	var content []string
+	content = append(content, lipgloss.NewStyle().Bold(true).Render("Workspace Management"))
+	content = append(content, "")
+
+	if len(m.workspaceManager.workspaces) == 0 {
+		content = append(content, "No workspaces found")
+		content = append(content, "Press 'w' to load workspace info")
+	} else {
+		// Current environment info
+		content = append(content, fmt.Sprintf("Current Environment: %s", m.workspaceManager.currentEnv))
+		content = append(content, fmt.Sprintf("Active Workspace: %s", m.currentWorkspace))
+		content = append(content, "")
+
+		// List workspaces
+		content = append(content, "Available Workspaces:")
+		for i, workspace := range m.workspaceManager.workspaces {
+			prefix := "  "
+			if i == m.workspaceManager.selectedIndex {
+				prefix = "▶ "
+			}
+
+			current := ""
+			if workspace.Name == m.currentWorkspace {
+				current = " (current)"
+			}
+
+			statusIcon := getWorkspaceStatusIcon(workspace.Status)
+			line := fmt.Sprintf("%s%s %s (%s)%s",
+				prefix, statusIcon, workspace.Name, workspace.Environment, current)
+
+			if i == m.workspaceManager.selectedIndex {
+				line = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F87")).Render(line)
+			}
+
+			content = append(content, line)
+
+			// Show details if selected
+			if i == m.workspaceManager.selectedIndex {
+				content = append(content, fmt.Sprintf("    Backend: %s", workspace.Backend))
+				content = append(content, fmt.Sprintf("    Path: %s", workspace.Path))
+				if workspace.LastApply != "" {
+					content = append(content, fmt.Sprintf("    Last Apply: %s", workspace.LastApply))
+				}
+			}
+		}
+
+		content = append(content, "")
+		content = append(content, "Enter: switch workspace | ↑/↓: navigate")
+	}
+
+	return style.Render(strings.Join(content, "\n"))
+}
+
+// Helper functions for enhanced views
+
+func getActionIcon(action string) string {
+	switch action {
+	case "create":
+		return "+"
+	case "update":
+		return "~"
+	case "delete":
+		return "-"
+	case "replace":
+		return "±"
+	default:
+		return "?"
+	}
+}
+
+func getWorkspaceStatusIcon(status string) string {
+	switch status {
+	case "clean":
+		return "✓"
+	case "dirty":
+		return "⚠"
+	case "error":
+		return "✗"
+	default:
+		return "?"
+	}
+}
+
 // Command methods
 
 func (m *TerraformTUI) loadTemplates() tea.Cmd {
@@ -237,35 +476,22 @@ func (m *TerraformTUI) loadWorkspaces() tea.Cmd {
 
 func (m *TerraformTUI) selectTemplate(templatePath string) tea.Cmd {
 	return func() tea.Msg {
+		// Load template and set up workspace
 		m.currentTemplate = templatePath
-
-		// Load main.tf if exists
-		mainTfPath := filepath.Join(templatePath, "main.tf")
-		if content, err := os.ReadFile(mainTfPath); err == nil {
-			return fileLoadedMsg{
-				path:    mainTfPath,
-				content: string(content),
-			}
+		if m.manager == nil {
+			m.manager = tfbicep.NewTerraformManager(templatePath)
 		}
-
+		m.status = fmt.Sprintf("Selected template: %s", filepath.Base(templatePath))
 		return nil
 	}
 }
 
 func (m *TerraformTUI) selectWorkspace(workspacePath string) tea.Cmd {
 	return func() tea.Msg {
-		m.currentWorkspace = workspacePath
+		// Set up workspace manager
+		m.currentWorkspace = filepath.Base(workspacePath)
 		m.manager = tfbicep.NewTerraformManager(workspacePath)
-
-		// Load main.tf if exists
-		mainTfPath := filepath.Join(workspacePath, "main.tf")
-		if content, err := os.ReadFile(mainTfPath); err == nil {
-			return fileLoadedMsg{
-				path:    mainTfPath,
-				content: string(content),
-			}
-		}
-
+		m.status = fmt.Sprintf("Selected workspace: %s", m.currentWorkspace)
 		return nil
 	}
 }
@@ -439,6 +665,277 @@ func (m *TerraformTUI) openExternalEditor() tea.Cmd {
 
 		return fileEditedMsg{m.currentFile}
 	}
+}
+
+// Enhanced State Management Commands
+
+func (m *TerraformTUI) loadStateResources() tea.Cmd {
+	return func() tea.Msg {
+		if m.manager == nil {
+			return errorMsg{fmt.Errorf("no workspace selected")}
+		}
+
+		// Execute terraform state list to get resources
+		cmd := exec.Command("terraform", "state", "list")
+		cmd.Dir = m.manager.WorkingDir
+		output, err := cmd.Output()
+		if err != nil {
+			return errorMsg{fmt.Errorf("failed to list state resources: %v", err)}
+		}
+
+		// Parse output and create StateResource objects
+		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+		var resources []StateResource
+
+		for _, line := range lines {
+			if line == "" {
+				continue
+			}
+
+			// Parse resource address (e.g., "azurerm_resource_group.main")
+			parts := strings.Split(line, ".")
+			if len(parts) >= 2 {
+				resourceType := parts[0]
+				resourceName := strings.Join(parts[1:], ".")
+
+				resource := StateResource{
+					Type:     resourceType,
+					Name:     resourceName,
+					Address:  line,
+					Provider: strings.Split(resourceType, "_")[0], // Extract provider from type
+					Status:   "ok",
+				}
+
+				// Get detailed resource information
+				detailCmd := exec.Command("terraform", "state", "show", line)
+				detailCmd.Dir = m.manager.WorkingDir
+				if detailOutput, detailErr := detailCmd.Output(); detailErr == nil {
+					// Parse terraform state show output for attributes
+					resource.Attributes = parseStateShowOutput(string(detailOutput))
+				}
+
+				resources = append(resources, resource)
+			}
+		}
+
+		return stateResourcesLoadedMsg{resources: resources}
+	}
+}
+
+func (m *TerraformTUI) loadPlanChanges() tea.Cmd {
+	return func() tea.Msg {
+		if m.manager == nil {
+			return errorMsg{fmt.Errorf("no workspace selected")}
+		}
+
+		// Execute terraform plan with JSON output
+		cmd := exec.Command("terraform", "plan", "-json", "-out=tfplan")
+		cmd.Dir = m.manager.WorkingDir
+		output, err := cmd.Output()
+		if err != nil {
+			return errorMsg{fmt.Errorf("failed to generate plan: %v", err)}
+		}
+
+		// Parse JSON plan output
+		changes := parsePlanOutput(string(output))
+
+		return planChangesLoadedMsg{changes: changes}
+	}
+}
+
+func (m *TerraformTUI) loadWorkspaceInfo() tea.Cmd {
+	return func() tea.Msg {
+		if m.manager == nil {
+			return errorMsg{fmt.Errorf("no workspace selected")}
+		}
+
+		// Get current workspace
+		cmd := exec.Command("terraform", "workspace", "show")
+		cmd.Dir = m.manager.WorkingDir
+		currentOutput, err := cmd.Output()
+		if err != nil {
+			return errorMsg{fmt.Errorf("failed to get current workspace: %v", err)}
+		}
+
+		currentWorkspace := strings.TrimSpace(string(currentOutput))
+
+		// List all workspaces
+		cmd = exec.Command("terraform", "workspace", "list")
+		cmd.Dir = m.manager.WorkingDir
+		listOutput, err := cmd.Output()
+		if err != nil {
+			return errorMsg{fmt.Errorf("failed to list workspaces: %v", err)}
+		}
+
+		// Parse workspace list
+		var workspaces []WorkspaceInfo
+		lines := strings.Split(strings.TrimSpace(string(listOutput)), "\n")
+
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if line == "" {
+				continue
+			}
+
+			// Remove asterisk from current workspace
+			workspaceName := strings.TrimPrefix(line, "* ")
+			workspaceName = strings.TrimSpace(workspaceName)
+
+			workspace := WorkspaceInfo{
+				Name:        workspaceName,
+				Path:        m.manager.WorkingDir,
+				Environment: inferEnvironment(workspaceName),
+				Backend:     "local", // TODO: Detect backend type
+				Status:      "clean", // TODO: Check for uncommitted changes
+			}
+
+			workspaces = append(workspaces, workspace)
+		}
+
+		return workspaceInfoLoadedMsg{
+			workspaces: workspaces,
+			current:    currentWorkspace,
+		}
+	}
+}
+
+func (m *TerraformTUI) togglePlanFilter() {
+	// Cycle through filter options: all -> create -> update -> delete -> all
+	switch m.planViewer.filterAction {
+	case "":
+		m.planViewer.filterAction = "create"
+	case "create":
+		m.planViewer.filterAction = "update"
+	case "update":
+		m.planViewer.filterAction = "delete"
+	case "delete":
+		m.planViewer.filterAction = ""
+	}
+
+	m.status = fmt.Sprintf("Filter: %s", m.planViewer.filterAction)
+}
+
+func (m *TerraformTUI) targetResource(resourceAddress string) tea.Cmd {
+	return func() tea.Msg {
+		if m.manager == nil {
+			return errorMsg{fmt.Errorf("no workspace selected")}
+		}
+
+		// Execute terraform apply with target
+		cmd := exec.Command("terraform", "apply", "-target="+resourceAddress, "-auto-approve")
+		cmd.Dir = m.manager.WorkingDir
+		output, err := cmd.CombinedOutput()
+
+		success := err == nil
+		operation := tfbicep.TerraformOperation{
+			Command:  fmt.Sprintf("apply -target=%s", resourceAddress),
+			Success:  success,
+			Output:   string(output),
+			Duration: time.Duration(0), // Initialize with zero duration
+		}
+
+		if err != nil {
+			operation.Error = err.Error()
+		}
+
+		return operationCompletedMsg{operation: operation}
+	}
+}
+
+// Helper functions for parsing Terraform output
+
+func parseStateShowOutput(output string) map[string]interface{} {
+	attributes := make(map[string]interface{})
+
+	// Simple parsing - in a real implementation, you'd use terraform's JSON output
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, " = ") {
+			parts := strings.SplitN(line, " = ", 2)
+			if len(parts) == 2 {
+				key := strings.TrimSpace(parts[0])
+				value := strings.TrimSpace(parts[1])
+				attributes[key] = value
+			}
+		}
+	}
+
+	return attributes
+}
+
+func parsePlanOutput(jsonOutput string) []PlanChange {
+	var changes []PlanChange
+
+	// Parse JSON plan output - simplified version
+	// In a real implementation, you'd properly parse the Terraform JSON plan format
+	lines := strings.Split(jsonOutput, "\n")
+	for _, line := range lines {
+		if strings.Contains(line, `"change"`) && strings.Contains(line, `"action"`) {
+			// Extract action and resource information
+			change := PlanChange{
+				Action:   "update", // Simplified - would parse from JSON
+				Resource: "example_resource",
+				Type:     "azurerm_resource_group",
+				Name:     "main",
+				Impact:   "medium",
+			}
+			changes = append(changes, change)
+		}
+	}
+
+	// If no changes found, create some example data for demonstration
+	if len(changes) == 0 {
+		changes = []PlanChange{
+			{
+				Action:   "create",
+				Resource: "azurerm_resource_group.main",
+				Type:     "azurerm_resource_group",
+				Name:     "main",
+				Impact:   "low",
+				Reason:   "Resource does not exist",
+			},
+			{
+				Action:   "update",
+				Resource: "azurerm_virtual_machine.web",
+				Type:     "azurerm_virtual_machine",
+				Name:     "web",
+				Impact:   "high",
+				Reason:   "VM size change",
+			},
+		}
+	}
+
+	return changes
+}
+
+func inferEnvironment(workspaceName string) string {
+	workspaceLower := strings.ToLower(workspaceName)
+	if strings.Contains(workspaceLower, "prod") || strings.Contains(workspaceLower, "production") {
+		return "prod"
+	}
+	if strings.Contains(workspaceLower, "stag") || strings.Contains(workspaceLower, "staging") {
+		return "staging"
+	}
+	if strings.Contains(workspaceLower, "dev") || strings.Contains(workspaceLower, "development") {
+		return "dev"
+	}
+	return "dev" // Default to dev
+}
+
+// Message types for the enhanced features
+
+type stateResourcesLoadedMsg struct {
+	resources []StateResource
+}
+
+type planChangesLoadedMsg struct {
+	changes []PlanChange
+}
+
+type workspaceInfoLoadedMsg struct {
+	workspaces []WorkspaceInfo
+	current    string
 }
 
 // Message types

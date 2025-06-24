@@ -11,6 +11,65 @@ import (
 	"github.com/olafkfreund/azure-tui/internal/azure/tfbicep"
 )
 
+// Enhanced State Management Types
+type StateResource struct {
+	Type         string                 `json:"type"`
+	Name         string                 `json:"name"`
+	Provider     string                 `json:"provider"`
+	Address      string                 `json:"address"`
+	Attributes   map[string]interface{} `json:"attributes"`
+	Dependencies []string               `json:"dependencies"`
+	Tainted      bool                   `json:"tainted"`
+	Status       string                 `json:"status"` // "ok", "tainted", "error"
+}
+
+type StateViewer struct {
+	resources     []StateResource
+	selectedIndex int
+	viewMode      string // "list", "tree", "graph"
+	filterText    string
+	showDetails   bool
+}
+
+// Enhanced Plan Management Types
+type PlanChange struct {
+	Action    string                 `json:"action"`    // "create", "update", "delete", "replace"
+	Resource  string                 `json:"resource"`  // resource address
+	Type      string                 `json:"type"`      // resource type
+	Name      string                 `json:"name"`      // resource name
+	Before    map[string]interface{} `json:"before"`    // current values
+	After     map[string]interface{} `json:"after"`     // planned values
+	Reason    string                 `json:"reason"`    // reason for change
+	Sensitive bool                   `json:"sensitive"` // contains sensitive data
+	Impact    string                 `json:"impact"`    // "low", "medium", "high"
+}
+
+type PlanViewer struct {
+	changes       []PlanChange
+	selectedIndex int
+	showDetails   bool
+	filterAction  string // filter by action type
+	groupByType   bool   // group changes by resource type
+}
+
+// Enhanced Workspace Management Types
+type WorkspaceManager struct {
+	workspaces    []WorkspaceInfo
+	selectedIndex int
+	currentEnv    string
+	envVars       map[string]map[string]string // env -> var -> value
+}
+
+type WorkspaceInfo struct {
+	Name        string            `json:"name"`
+	Path        string            `json:"path"`
+	Environment string            `json:"environment"` // dev, staging, prod
+	Backend     string            `json:"backend"`
+	Variables   map[string]string `json:"variables"`
+	LastApply   string            `json:"last_apply"`
+	Status      string            `json:"status"` // "clean", "dirty", "error"
+}
+
 // TerraformTUI represents the Terraform TUI interface
 type TerraformTUI struct {
 	width            int
@@ -29,15 +88,36 @@ type TerraformTUI struct {
 	showPopup        bool
 	popupContent     string
 	popupTitle       string
+
+	// Enhanced State Management
+	stateViewer      StateViewer
+	stateResources   []StateResource
+	selectedResource int
+	showDependencies bool
+
+	// Enhanced Plan Management
+	planViewer      PlanViewer
+	planChanges     []PlanChange
+	selectedChange  int
+	showPlanDetails bool
+	approvalMode    bool
+
+	// Workspace Management
+	workspaceManager WorkspaceManager
+	currentEnv       string // dev, staging, prod
+	envVariables     map[string]string
 }
 
 // Views
 const (
-	ViewTemplates  = "templates"
-	ViewWorkspaces = "workspaces"
-	ViewEditor     = "editor"
-	ViewOperations = "operations"
-	ViewState      = "state"
+	ViewTemplates   = "templates"
+	ViewWorkspaces  = "workspaces"
+	ViewEditor      = "editor"
+	ViewOperations  = "operations"
+	ViewState       = "state"
+	ViewStateViewer = "state_viewer"
+	ViewPlanViewer  = "plan_viewer"
+	ViewEnvManager  = "env_manager"
 )
 
 // Key bindings
@@ -63,6 +143,15 @@ type keyMap struct {
 	Format     key.Binding
 	State      key.Binding
 	Refresh    key.Binding
+
+	// Enhanced features
+	StateViewer    key.Binding
+	PlanViewer     key.Binding
+	EnvManager     key.Binding
+	ShowDeps       key.Binding
+	FilterToggle   key.Binding
+	ApprovalMode   key.Binding
+	ResourceTarget key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -165,6 +254,36 @@ var keys = keyMap{
 		key.WithKeys("ctrl+r"),
 		key.WithHelp("ctrl+r", "refresh"),
 	),
+
+	// Enhanced features
+	StateViewer: key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "state viewer"),
+	),
+	PlanViewer: key.NewBinding(
+		key.WithKeys("p"),
+		key.WithHelp("p", "plan viewer"),
+	),
+	EnvManager: key.NewBinding(
+		key.WithKeys("w"),
+		key.WithHelp("w", "workspace manager"),
+	),
+	ShowDeps: key.NewBinding(
+		key.WithKeys("d"),
+		key.WithHelp("d", "show dependencies"),
+	),
+	FilterToggle: key.NewBinding(
+		key.WithKeys("f"),
+		key.WithHelp("f", "toggle filter"),
+	),
+	ApprovalMode: key.NewBinding(
+		key.WithKeys("a"),
+		key.WithHelp("a", "approval mode"),
+	),
+	ResourceTarget: key.NewBinding(
+		key.WithKeys("t"),
+		key.WithHelp("t", "target resource"),
+	),
 }
 
 // NewTerraformTUI creates a new Terraform TUI
@@ -173,6 +292,19 @@ func NewTerraformTUI() *TerraformTUI {
 		activeView: ViewTemplates,
 		status:     "Ready",
 		operations: make([]tfbicep.TerraformOperation, 0),
+
+		// Initialize enhanced components
+		stateViewer: StateViewer{
+			viewMode: "list",
+		},
+		planViewer: PlanViewer{
+			showDetails: false,
+		},
+		workspaceManager: WorkspaceManager{
+			currentEnv: "dev",
+			envVars:    make(map[string]map[string]string),
+		},
+		envVariables: make(map[string]string),
 	}
 
 	// Initialize templates list
@@ -268,6 +400,39 @@ func (m *TerraformTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeView == ViewEditor {
 				m.activeView = ViewTemplates
 			}
+
+		// Enhanced feature key bindings
+		case key.Matches(msg, keys.StateViewer):
+			m.activeView = ViewStateViewer
+			return m, m.loadStateResources()
+
+		case key.Matches(msg, keys.PlanViewer):
+			m.activeView = ViewPlanViewer
+			return m, m.loadPlanChanges()
+
+		case key.Matches(msg, keys.EnvManager):
+			m.activeView = ViewEnvManager
+			return m, m.loadWorkspaceInfo()
+
+		case key.Matches(msg, keys.ShowDeps):
+			if m.activeView == ViewStateViewer {
+				m.showDependencies = !m.showDependencies
+			}
+
+		case key.Matches(msg, keys.FilterToggle):
+			if m.activeView == ViewPlanViewer {
+				m.togglePlanFilter()
+			}
+
+		case key.Matches(msg, keys.ApprovalMode):
+			if m.activeView == ViewPlanViewer {
+				m.approvalMode = !m.approvalMode
+			}
+
+		case key.Matches(msg, keys.ResourceTarget):
+			if m.activeView == ViewPlanViewer && len(m.planChanges) > 0 {
+				return m, m.targetResource(m.planChanges[m.selectedChange].Resource)
+			}
 		}
 
 		// Handle view-specific updates
@@ -293,6 +458,24 @@ func (m *TerraformTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 		cmds = append(cmds, cmd)
+
+	// Handle enhanced feature messages
+	case stateResourcesLoadedMsg:
+		m.stateViewer.resources = msg.resources
+		m.status = "State resources loaded"
+
+	case planChangesLoadedMsg:
+		m.planViewer.changes = msg.changes
+		m.status = "Plan changes loaded"
+
+	case workspaceInfoLoadedMsg:
+		m.workspaceManager.workspaces = msg.workspaces
+		m.currentWorkspace = msg.current
+		m.status = "Workspace info loaded"
+
+	default:
+		// Handle other message types through the existing handler
+		return m.handleMessages(msg)
 	}
 
 	return m, tea.Batch(cmds...)
@@ -316,6 +499,12 @@ func (m *TerraformTUI) View() string {
 		content = m.renderOperationsView()
 	case ViewState:
 		content = m.renderStateView()
+	case ViewStateViewer:
+		content = m.renderStateViewerView()
+	case ViewPlanViewer:
+		content = m.renderPlanViewerView()
+	case ViewEnvManager:
+		content = m.renderEnvManagerView()
 	default:
 		content = m.renderTemplatesView()
 	}
@@ -340,7 +529,7 @@ func (m *TerraformTUI) updateSizes() {
 }
 
 func (m *TerraformTUI) nextView() {
-	views := []string{ViewTemplates, ViewWorkspaces, ViewEditor, ViewOperations, ViewState}
+	views := []string{ViewTemplates, ViewWorkspaces, ViewEditor, ViewOperations, ViewState, ViewStateViewer, ViewPlanViewer, ViewEnvManager}
 	current := 0
 	for i, view := range views {
 		if view == m.activeView {
@@ -352,7 +541,7 @@ func (m *TerraformTUI) nextView() {
 }
 
 func (m *TerraformTUI) prevView() {
-	views := []string{ViewTemplates, ViewWorkspaces, ViewEditor, ViewOperations, ViewState}
+	views := []string{ViewTemplates, ViewWorkspaces, ViewEditor, ViewOperations, ViewState, ViewStateViewer, ViewPlanViewer, ViewEnvManager}
 	current := 0
 	for i, view := range views {
 		if view == m.activeView {

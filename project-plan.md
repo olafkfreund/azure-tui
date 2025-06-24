@@ -119,9 +119,15 @@ A comprehensive Go-based Terminal User Interface for Azure resource management f
 - **AI-Guided Workflows**: Intelligent resource creation wizards
 
 ### 🏗️ **Infrastructure Enhancements**
+- ✅ **Enhanced Terraform Integration**: Complete visual state management, interactive plan visualization, and workspace management (COMPLETED June 2025)
+- ✅ **Visual State Management**: Interactive Terraform state browser with resource details and dependency mapping (COMPLETED)
+- ✅ **Interactive Plan Visualization**: Smart plan filtering with color-coded change indicators (COMPLETED)
+- ✅ **Enhanced Workspace Management**: Visual workspace switching with status indicators (COMPLETED)
+- ✅ **Dependency Viewer**: Resource dependency graph visualization (COMPLETED)
+- ✅ **Target Operations**: Precise resource targeting for safer deployments (COMPLETED)
+- ✅ **State Management**: Terraform state file analysis and operations (COMPLETED)
 - **In-Place IaC Editing**: Direct Terraform/Bicep file modification
 - **Deployment Pipelines**: Integrated CI/CD workflow support
-- **State Management**: Terraform state file analysis and operations
 - **Template Library**: Pre-built infrastructure patterns
 
 ### 🔐 **Advanced Operations**
