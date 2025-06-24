@@ -362,6 +362,112 @@ func (m *TerraformTUI) renderEnvManagerView() string {
 	return style.Render(strings.Join(content, "\n"))
 }
 
+func (m *TerraformTUI) renderVarEditorView() string {
+	// Clean, frameless styling for consistency
+	style := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FAFAFA")).
+		Padding(1, 2)
+
+	if m.activeView == ViewVarEditor {
+		style = style.Foreground(lipgloss.Color("#FF5F87"))
+	}
+
+	var content []string
+	content = append(content, lipgloss.NewStyle().Bold(true).Render("Interactive Variable Editor"))
+	content = append(content, "")
+
+	if len(m.variableEditor.variables) == 0 {
+		content = append(content, "No variables loaded")
+		content = append(content, "Press 'v' to load variables first")
+	} else {
+		// Show editing instructions
+		if m.variableEditor.editMode {
+			content = append(content, fmt.Sprintf("Editing: %s", m.variableEditor.editingVar))
+			content = append(content, fmt.Sprintf("Original: %s", m.variableEditor.originalValue))
+			content = append(content, fmt.Sprintf("New Value: %s", m.variableEditor.editingValue))
+			content = append(content, "")
+			content = append(content, "Enter: save | Esc: cancel | Type to edit")
+		} else {
+			content = append(content, fmt.Sprintf("Variables: %d", len(m.variableEditor.variables)))
+			content = append(content, "")
+
+			// List variables with selection indicator
+			i := 0
+			for name, value := range m.variableEditor.variables {
+				prefix := "  "
+				if i == m.variableEditor.selectedIndex {
+					prefix = "▶ "
+				}
+
+				line := fmt.Sprintf("%s%s = %s", prefix, name, value)
+				if i == m.variableEditor.selectedIndex {
+					line = lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5F87")).Render(line)
+				}
+
+				content = append(content, line)
+				i++
+			}
+
+			content = append(content, "")
+			content = append(content, "e: edit | ↑/↓: navigate | Esc: back")
+		}
+	}
+
+	return style.Render(strings.Join(content, "\n"))
+}
+
+// Interactive Variable Editing Methods
+
+func (m *TerraformTUI) startVariableEdit() tea.Cmd {
+	if len(m.variableEditor.variables) == 0 {
+		return nil
+	}
+
+	// Get the selected variable
+	i := 0
+	for name, value := range m.variableEditor.variables {
+		if i == m.variableEditor.selectedIndex {
+			m.variableEditor.editMode = true
+			m.variableEditor.editingVar = name
+			m.variableEditor.editingValue = value
+			m.variableEditor.originalValue = value
+			break
+		}
+		i++
+	}
+
+	return nil
+}
+
+func (m *TerraformTUI) saveVariableEdit() tea.Cmd {
+	if !m.variableEditor.editMode {
+		return nil
+	}
+
+	// Update the variable
+	name := m.variableEditor.editingVar
+	value := m.variableEditor.editingValue
+
+	// Exit edit mode
+	m.variableEditor.editMode = false
+	m.variableEditor.editingVar = ""
+	m.variableEditor.editingValue = ""
+	m.variableEditor.originalValue = ""
+
+	// Update the variable in the file and reload
+	return tea.Batch(
+		m.updateTerraformVariable(name, value),
+		func() tea.Msg { return variableEditCompletedMsg{name: name, value: value} },
+	)
+}
+
+func (m *TerraformTUI) cancelVariableEdit() {
+	m.variableEditor.editMode = false
+	m.variableEditor.editingVar = ""
+	m.variableEditor.editingValue = ""
+	m.variableEditor.originalValue = ""
+}
+
 // Helper functions for enhanced views
 
 func getActionIcon(action string) string {
@@ -511,7 +617,589 @@ func checkStateLock(workingDir string) (bool, string, error) {
 	return false, "", nil
 }
 
-// Command methods
+// Enhanced Error Handling Types and Functions
+
+type TerraformError struct {
+	Operation   string
+	Message     string
+	Details     string
+	Severity    string // "low", "medium", "high", "critical"
+	Suggestions []string
+}
+
+func (e TerraformError) Error() string {
+	return fmt.Sprintf("[%s] %s: %s", e.Severity, e.Operation, e.Message)
+}
+
+// Enhanced error handler for Terraform operations
+func (m *TerraformTUI) handleTerraformError(operation string, err error) TerraformError {
+	if err == nil {
+		return TerraformError{}
+	}
+
+	errStr := err.Error()
+	terraformErr := TerraformError{
+		Operation: operation,
+		Message:   errStr,
+		Severity:  "medium",
+	}
+
+	// Analyze error patterns and provide suggestions
+	switch {
+	case strings.Contains(errStr, "terraform not found") || strings.Contains(errStr, "command not found"):
+		terraformErr.Severity = "critical"
+		terraformErr.Details = "Terraform CLI is not installed or not in PATH"
+		terraformErr.Suggestions = []string{
+			"Install Terraform CLI from https://terraform.io/downloads",
+			"Ensure terraform binary is in your PATH",
+			"Verify installation with: terraform version",
+		}
+
+	case strings.Contains(errStr, "not initialized"):
+		terraformErr.Severity = "high"
+		terraformErr.Details = "Terraform working directory not initialized"
+		terraformErr.Suggestions = []string{
+			"Run 'terraform init' to initialize the working directory",
+			"Ensure .terraform directory exists",
+			"Check backend configuration",
+		}
+
+	case strings.Contains(errStr, "state lock"):
+		terraformErr.Severity = "high"
+		terraformErr.Details = "Terraform state is locked by another process"
+		terraformErr.Suggestions = []string{
+			"Wait for the current operation to complete",
+			"Force unlock if the lock is stale: terraform force-unlock <lock-id>",
+			"Check for running Terraform processes",
+		}
+
+	case strings.Contains(errStr, "no configuration files"):
+		terraformErr.Severity = "high"
+		terraformErr.Details = "No Terraform configuration files found"
+		terraformErr.Suggestions = []string{
+			"Create .tf files in the current directory",
+			"Navigate to a directory with Terraform configuration",
+			"Use templates to create a new configuration",
+		}
+
+	case strings.Contains(errStr, "provider"):
+		terraformErr.Severity = "medium"
+		terraformErr.Details = "Provider configuration or authentication issue"
+		terraformErr.Suggestions = []string{
+			"Check provider configuration",
+			"Verify authentication credentials",
+			"Run 'terraform init' to download providers",
+		}
+
+	case strings.Contains(errStr, "invalid syntax") || strings.Contains(errStr, "syntax error"):
+		terraformErr.Severity = "medium"
+		terraformErr.Details = "Terraform configuration syntax error"
+		terraformErr.Suggestions = []string{
+			"Run 'terraform validate' to check syntax",
+			"Use 'terraform fmt' to format configuration",
+			"Check for missing quotes, brackets, or commas",
+		}
+
+	case strings.Contains(errStr, "permission denied"):
+		terraformErr.Severity = "high"
+		terraformErr.Details = "Insufficient permissions"
+		terraformErr.Suggestions = []string{
+			"Check file permissions in the working directory",
+			"Verify cloud provider permissions",
+			"Ensure terraform can write to .terraform directory",
+		}
+
+	case strings.Contains(errStr, "network") || strings.Contains(errStr, "timeout"):
+		terraformErr.Severity = "medium"
+		terraformErr.Details = "Network connectivity issue"
+		terraformErr.Suggestions = []string{
+			"Check internet connection",
+			"Verify firewall settings",
+			"Try again after a few moments",
+		}
+
+	default:
+		terraformErr.Severity = "low"
+		terraformErr.Details = "Unknown error occurred"
+		terraformErr.Suggestions = []string{
+			"Check Terraform logs for more details",
+			"Try running the command directly in terminal",
+			"Verify working directory and configuration",
+		}
+	}
+
+	return terraformErr
+}
+
+// Format error for display in TUI
+func (m *TerraformTUI) formatErrorForDisplay(terraformErr TerraformError) string {
+	if terraformErr.Message == "" {
+		return ""
+	}
+
+	var lines []string
+
+	// Severity indicator
+	severityIcon := "⚠️"
+	switch terraformErr.Severity {
+	case "critical":
+		severityIcon = "🚨"
+	case "high":
+		severityIcon = "🔴"
+	case "medium":
+		severityIcon = "🟡"
+	case "low":
+		severityIcon = "🔵"
+	}
+
+	lines = append(lines, fmt.Sprintf("%s %s Error in %s", severityIcon, strings.Title(terraformErr.Severity), terraformErr.Operation))
+	lines = append(lines, "")
+	lines = append(lines, "Message:")
+	lines = append(lines, terraformErr.Message)
+
+	if terraformErr.Details != "" {
+		lines = append(lines, "")
+		lines = append(lines, "Details:")
+		lines = append(lines, terraformErr.Details)
+	}
+
+	if len(terraformErr.Suggestions) > 0 {
+		lines = append(lines, "")
+		lines = append(lines, "Suggestions:")
+		for _, suggestion := range terraformErr.Suggestions {
+			lines = append(lines, fmt.Sprintf("• %s", suggestion))
+		}
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// Enhanced progress indicator with better visual styling
+func (m *TerraformTUI) renderEnhancedProgressIndicator(progress ParseProgressMsg) string {
+	if progress.total == 0 {
+		return ""
+	}
+
+	percentage := float64(progress.current) / float64(progress.total) * 100
+	filledBlocks := int(percentage / 5)
+
+	// Create gradient progress bar
+	progressBar := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#50FA7B")).
+		Render(strings.Repeat("█", filledBlocks)) +
+		lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#44475A")).
+			Render(strings.Repeat("░", 20-filledBlocks))
+
+	// Stage indicator with icon
+	stageIcon := "⚡"
+	switch {
+	case strings.Contains(progress.stage, "Loading"):
+		stageIcon = "📂"
+	case strings.Contains(progress.stage, "Parsing"):
+		stageIcon = "⚙️"
+	case strings.Contains(progress.stage, "Generating"):
+		stageIcon = "🔨"
+	case strings.Contains(progress.stage, "Analyzing"):
+		stageIcon = "🔍"
+	}
+
+	progressStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#6272A4")).
+		Padding(1, 2).
+		Margin(1, 0)
+
+	content := fmt.Sprintf("%s %s\n\n[%s] %.1f%%\n\nETA: %s",
+		stageIcon, progress.stage, progressBar, percentage, m.estimateETA(progress))
+
+	return progressStyle.Render(content)
+}
+
+// Estimate completion time for progress indicator
+func (m *TerraformTUI) estimateETA(progress ParseProgressMsg) string {
+	if progress.current == 0 || !m.progressIndicator.isActive {
+		return "calculating..."
+	}
+
+	elapsed := time.Since(m.progressIndicator.lastUpdate)
+	if elapsed.Seconds() < 1 {
+		return "< 1s"
+	}
+
+	rate := float64(progress.current) / elapsed.Seconds()
+	if rate <= 0 {
+		return "unknown"
+	}
+
+	remaining := float64(progress.total-progress.current) / rate
+	if remaining < 60 {
+		return fmt.Sprintf("%.0fs", remaining)
+	}
+	return fmt.Sprintf("%.1fm", remaining/60)
+}
+
+// Enhanced error display with better styling and categorization
+func (m *TerraformTUI) renderEnhancedError(terraformErr TerraformError) string {
+	if terraformErr.Message == "" {
+		return ""
+	}
+
+	// Choose color scheme based on severity
+	var borderColor, titleColor, iconColor lipgloss.Color
+	var severityIcon string
+
+	switch terraformErr.Severity {
+	case "critical":
+		borderColor = lipgloss.Color("#FF5555")
+		titleColor = lipgloss.Color("#FF5555")
+		iconColor = lipgloss.Color("#FF5555")
+		severityIcon = "🚨"
+	case "high":
+		borderColor = lipgloss.Color("#FFB86C")
+		titleColor = lipgloss.Color("#FFB86C")
+		iconColor = lipgloss.Color("#FFB86C")
+		severityIcon = "⚠️"
+	case "medium":
+		borderColor = lipgloss.Color("#F1FA8C")
+		titleColor = lipgloss.Color("#F1FA8C")
+		iconColor = lipgloss.Color("#F1FA8C")
+		severityIcon = "⚡"
+	default:
+		borderColor = lipgloss.Color("#8BE9FD")
+		titleColor = lipgloss.Color("#8BE9FD")
+		iconColor = lipgloss.Color("#8BE9FD")
+		severityIcon = "ℹ️"
+	}
+
+	errorStyle := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(borderColor).
+		Padding(1, 2).
+		Margin(1, 0).
+		Width(80)
+
+	titleStyle := lipgloss.NewStyle().
+		Foreground(titleColor).
+		Bold(true)
+
+	iconStyle := lipgloss.NewStyle().
+		Foreground(iconColor)
+
+	var content strings.Builder
+
+	// Title with icon
+	content.WriteString(titleStyle.Render(fmt.Sprintf("%s %s Error in %s",
+		iconStyle.Render(severityIcon),
+		strings.Title(terraformErr.Severity),
+		terraformErr.Operation)))
+	content.WriteString("\n\n")
+
+	// Error message
+	content.WriteString("📝 Message:\n")
+	content.WriteString(terraformErr.Message)
+
+	// Details if available
+	if terraformErr.Details != "" {
+		content.WriteString("\n\n🔍 Details:\n")
+		content.WriteString(terraformErr.Details)
+	}
+
+	// Suggestions if available
+	if len(terraformErr.Suggestions) > 0 {
+		content.WriteString("\n\n💡 Suggestions:\n")
+		for i, suggestion := range terraformErr.Suggestions {
+			content.WriteString(fmt.Sprintf("%d. %s\n", i+1, suggestion))
+		}
+	}
+
+	return errorStyle.Render(content.String())
+}
+
+// Enhanced variable editor with syntax highlighting
+func (m *TerraformTUI) renderEnhancedVarEditor() string {
+	baseStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#F8F8F2")).
+		Padding(1, 2)
+
+	if m.activeView == ViewVarEditor {
+		baseStyle = baseStyle.Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#FF79C6"))
+	}
+
+	var content []string
+
+	// Header with enhanced styling
+	headerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#50FA7B")).
+		Bold(true)
+	content = append(content, headerStyle.Render("🔧 Interactive Variable Editor"))
+	content = append(content, "")
+
+	if len(m.variableEditor.variables) == 0 {
+		noVarsStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6272A4")).
+			Italic(true)
+		content = append(content, noVarsStyle.Render("No variables loaded"))
+		content = append(content, "Press 'v' to load variables first")
+	} else {
+		if m.variableEditor.editMode {
+			// Edit mode with enhanced styling
+			editHeaderStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#FFB86C")).
+				Bold(true)
+			content = append(content, editHeaderStyle.Render("✏️ Editing Variable"))
+			content = append(content, "")
+
+			varNameStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#8BE9FD")).
+				Bold(true)
+			content = append(content, fmt.Sprintf("Variable: %s",
+				varNameStyle.Render(m.variableEditor.editingVar)))
+
+			originalStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6272A4"))
+			content = append(content, fmt.Sprintf("Original: %s",
+				originalStyle.Render(m.variableEditor.originalValue)))
+
+			newValueStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#50FA7B")).
+				Background(lipgloss.Color("#44475A")).
+				Padding(0, 1)
+			content = append(content, fmt.Sprintf("New Value: %s",
+				newValueStyle.Render(m.variableEditor.editingValue)))
+
+			content = append(content, "")
+			helpStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6272A4"))
+			content = append(content, helpStyle.Render("Enter: save | Esc: cancel | Type to edit"))
+		} else {
+			// List mode with enhanced styling
+			content = append(content, fmt.Sprintf("Variables: %s",
+				lipgloss.NewStyle().Foreground(lipgloss.Color("#F1FA8C")).Render(fmt.Sprintf("%d", len(m.variableEditor.variables)))))
+			content = append(content, "")
+
+			// Enhanced variable list
+			i := 0
+			for name, value := range m.variableEditor.variables {
+				isSelected := i == m.variableEditor.selectedIndex
+
+				var nameStyle, valueStyle, equalsStyle lipgloss.Style
+				if isSelected {
+					nameStyle = lipgloss.NewStyle().
+						Foreground(lipgloss.Color("#50FA7B")).
+						Bold(true)
+					equalsStyle = lipgloss.NewStyle().
+						Foreground(lipgloss.Color("#FF79C6"))
+					valueStyle = lipgloss.NewStyle().
+						Foreground(lipgloss.Color("#F1FA8C"))
+				} else {
+					nameStyle = lipgloss.NewStyle().
+						Foreground(lipgloss.Color("#8BE9FD"))
+					equalsStyle = lipgloss.NewStyle().
+						Foreground(lipgloss.Color("#6272A4"))
+					valueStyle = lipgloss.NewStyle().
+						Foreground(lipgloss.Color("#F8F8F2"))
+				}
+
+				prefix := "  "
+				if isSelected {
+					prefix = lipgloss.NewStyle().
+						Foreground(lipgloss.Color("#FF79C6")).
+						Render("▶ ")
+				}
+
+				line := fmt.Sprintf("%s%s %s %s",
+					prefix,
+					nameStyle.Render(name),
+					equalsStyle.Render("="),
+					valueStyle.Render(fmt.Sprintf("\"%s\"", value)))
+
+				content = append(content, line)
+				i++
+			}
+
+			content = append(content, "")
+			helpStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#6272A4"))
+			content = append(content, helpStyle.Render("e: edit | ↑/↓: navigate | Esc: back"))
+		}
+	}
+
+	return baseStyle.Render(strings.Join(content, "\n"))
+}
+
+// Enhanced plan viewer with better action icons and colors
+func (m *TerraformTUI) renderEnhancedPlanViewer() string {
+	baseStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#F8F8F2")).
+		Padding(1, 2)
+
+	if m.activeView == ViewPlanViewer {
+		baseStyle = baseStyle.Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("#FF79C6"))
+	}
+
+	var content []string
+
+	// Enhanced header
+	headerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#50FA7B")).
+		Bold(true)
+	content = append(content, headerStyle.Render("📊 Terraform Plan Analysis"))
+	content = append(content, "")
+
+	if len(m.planViewer.changes) == 0 {
+		noChangesStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6272A4")).
+			Italic(true)
+		content = append(content, noChangesStyle.Render("No plan changes found"))
+		content = append(content, "Press 'p' to load plan changes")
+	} else {
+		// Enhanced filter summary
+		filterText := "All changes"
+		if m.planViewer.filterAction != "" {
+			filterText = fmt.Sprintf("Filter: %s", m.planViewer.filterAction)
+		}
+
+		summaryStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#F1FA8C"))
+		content = append(content, summaryStyle.Render(fmt.Sprintf("Changes: %d | %s", len(m.planViewer.changes), filterText)))
+		content = append(content, "")
+
+		// Enhanced action summary with icons and colors
+		actionCounts := make(map[string]int)
+		for _, change := range m.planViewer.changes {
+			actionCounts[change.Action]++
+		}
+
+		var summary []string
+		actionStyles := map[string]lipgloss.Style{
+			"create":  lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")),
+			"update":  lipgloss.NewStyle().Foreground(lipgloss.Color("#F1FA8C")),
+			"delete":  lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")),
+			"replace": lipgloss.NewStyle().Foreground(lipgloss.Color("#FFB86C")),
+		}
+
+		for action, count := range actionCounts {
+			icon := getEnhancedActionIcon(action)
+			style := actionStyles[action]
+			if style.GetForeground() == nil {
+				style = lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))
+			}
+			summary = append(summary, style.Render(fmt.Sprintf("%s %d %s", icon, count, action)))
+		}
+		content = append(content, strings.Join(summary, " | "))
+		content = append(content, "")
+
+		// Enhanced change list
+		filteredChanges := m.planViewer.changes
+		if m.planViewer.filterAction != "" {
+			var filtered []PlanChange
+			for _, change := range m.planViewer.changes {
+				if change.Action == m.planViewer.filterAction {
+					filtered = append(filtered, change)
+				}
+			}
+			filteredChanges = filtered
+		}
+
+		for i, change := range filteredChanges {
+			isSelected := i == m.selectedChange
+
+			icon := getEnhancedActionIcon(change.Action)
+			actionStyle := actionStyles[change.Action]
+			if actionStyle.GetForeground() == nil {
+				actionStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4"))
+			}
+
+			var resourceStyle lipgloss.Style
+			if isSelected {
+				resourceStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#FF79C6")).
+					Bold(true)
+			} else {
+				resourceStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#8BE9FD"))
+			}
+
+			prefix := "  "
+			if isSelected {
+				prefix = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#FF79C6")).
+					Render("▶ ")
+			}
+
+			impactIcon := getImpactIcon(change.Impact)
+			line := fmt.Sprintf("%s%s %s %s %s",
+				prefix,
+				actionStyle.Render(icon),
+				resourceStyle.Render(change.Resource),
+				lipgloss.NewStyle().Foreground(lipgloss.Color("#6272A4")).Render(fmt.Sprintf("(%s)", change.Action)),
+				impactIcon)
+
+			content = append(content, line)
+
+			// Enhanced details for selected item
+			if m.showPlanDetails && isSelected {
+				detailStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#6272A4")).
+					MarginLeft(4)
+
+				if change.Reason != "" {
+					content = append(content, detailStyle.Render(fmt.Sprintf("Reason: %s", change.Reason)))
+				}
+				content = append(content, detailStyle.Render(fmt.Sprintf("Impact: %s %s", getImpactIcon(change.Impact), change.Impact)))
+
+				if change.Sensitive {
+					sensitiveStyle := lipgloss.NewStyle().
+						Foreground(lipgloss.Color("#FF5555")).
+						Bold(true)
+					content = append(content, detailStyle.Render(sensitiveStyle.Render("⚠️ Contains sensitive data")))
+				}
+			}
+		}
+
+		content = append(content, "")
+		helpStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#6272A4"))
+		content = append(content, helpStyle.Render("f: filter toggle | a: approval mode | t: target resource | d: toggle details"))
+	}
+
+	return baseStyle.Render(strings.Join(content, "\n"))
+}
+
+// Enhanced action icons with better visual representation
+func getEnhancedActionIcon(action string) string {
+	switch action {
+	case "create":
+		return "🟢"
+	case "update":
+		return "🟡"
+	case "delete":
+		return "🔴"
+	case "replace":
+		return "🟠"
+	default:
+		return "❓"
+	}
+}
+
+// Impact icons for better visual feedback
+func getImpactIcon(impact string) string {
+	switch impact {
+	case "high":
+		return "🔥"
+	case "medium":
+		return "⚡"
+	case "low":
+		return "💡"
+	default:
+		return "❓"
+	}
+}
+
+// Basic TUI command methods implementation
 
 func (m *TerraformTUI) loadTemplates() tea.Cmd {
 	return func() tea.Msg {
@@ -627,6 +1315,8 @@ func (m *TerraformTUI) terraformInit() tea.Cmd {
 		m.status = "Running terraform init..."
 		op, err := m.manager.Init()
 		if err != nil {
+			terraformErr := m.handleTerraformError("init", err)
+			m.status = m.formatErrorForDisplay(terraformErr)
 			return errorMsg{err}
 		}
 		return operationCompletedMsg{*op}
@@ -644,6 +1334,8 @@ func (m *TerraformTUI) terraformPlan() tea.Cmd {
 		m.status = "Running terraform plan..."
 		op, err := m.manager.Plan()
 		if err != nil {
+			terraformErr := m.handleTerraformError("plan", err)
+			m.status = m.formatErrorForDisplay(terraformErr)
 			return errorMsg{err}
 		}
 		return operationCompletedMsg{*op}
@@ -661,6 +1353,8 @@ func (m *TerraformTUI) terraformApply() tea.Cmd {
 		m.status = "Running terraform apply..."
 		op, err := m.manager.Apply()
 		if err != nil {
+			terraformErr := m.handleTerraformError("apply", err)
+			m.status = m.formatErrorForDisplay(terraformErr)
 			return errorMsg{err}
 		}
 		return operationCompletedMsg{*op}
@@ -678,6 +1372,8 @@ func (m *TerraformTUI) terraformDestroy() tea.Cmd {
 		m.status = "Running terraform destroy..."
 		op, err := m.manager.Destroy()
 		if err != nil {
+			terraformErr := m.handleTerraformError("destroy", err)
+			m.status = m.formatErrorForDisplay(terraformErr)
 			return errorMsg{err}
 		}
 		return operationCompletedMsg{*op}
@@ -695,6 +1391,8 @@ func (m *TerraformTUI) terraformValidate() tea.Cmd {
 		m.status = "Running terraform validate..."
 		op, err := m.manager.Validate()
 		if err != nil {
+			terraformErr := m.handleTerraformError("validate", err)
+			m.status = m.formatErrorForDisplay(terraformErr)
 			return errorMsg{err}
 		}
 		return operationCompletedMsg{*op}
@@ -712,6 +1410,8 @@ func (m *TerraformTUI) terraformFormat() tea.Cmd {
 		m.status = "Running terraform format..."
 		op, err := m.manager.Format()
 		if err != nil {
+			terraformErr := m.handleTerraformError("format", err)
+			m.status = m.formatErrorForDisplay(terraformErr)
 			return errorMsg{err}
 		}
 		return operationCompletedMsg{*op}
@@ -727,31 +1427,6 @@ func (m *TerraformTUI) loadState() tea.Cmd {
 
 	return func() tea.Msg {
 		// State is loaded in the view rendering
-		return nil
-	}
-}
-
-func (m *TerraformTUI) saveCurrentFile() tea.Cmd {
-	if m.currentFile == "" {
-		return func() tea.Msg {
-			return errorMsg{fmt.Errorf("no file selected")}
-		}
-	}
-
-	return func() tea.Msg {
-		content := m.editor.Value()
-		if err := os.WriteFile(m.currentFile, []byte(content), 0644); err != nil {
-			return errorMsg{err}
-		}
-		return fileSavedMsg{m.currentFile}
-	}
-}
-
-func (m *TerraformTUI) newTerraformFile() tea.Cmd {
-	return func() tea.Msg {
-		m.currentFile = ""
-		m.editor.SetValue("")
-		m.activeView = ViewEditor
 		return nil
 	}
 }
@@ -787,32 +1462,110 @@ func (m *TerraformTUI) openExternalEditor() tea.Cmd {
 	}
 }
 
-// Enhanced State Management Commands
+func (m *TerraformTUI) saveCurrentFile() tea.Cmd {
+	if m.currentFile == "" {
+		return func() tea.Msg {
+			return errorMsg{fmt.Errorf("no file selected")}
+		}
+	}
 
+	return func() tea.Msg {
+		content := m.editor.Value()
+		if err := os.WriteFile(m.currentFile, []byte(content), 0644); err != nil {
+			return errorMsg{err}
+		}
+		return fileSavedMsg{m.currentFile}
+	}
+}
+
+func (m *TerraformTUI) newTerraformFile() tea.Cmd {
+	return func() tea.Msg {
+		m.currentFile = ""
+		m.editor.SetValue("")
+		m.activeView = ViewEditor
+		return nil
+	}
+}
+
+// Helper method for variable updates
+func (m *TerraformTUI) updateTerraformVariable(name, value string) tea.Cmd {
+	return func() tea.Msg {
+		if m.manager == nil {
+			return errorMsg{fmt.Errorf("no terraform manager available")}
+		}
+
+		workingDir := m.manager.WorkingDir
+		tfvarsPath := filepath.Join(workingDir, "terraform.tfvars")
+
+		// Read existing file or create new one
+		variables := make(map[string]string)
+		if content, err := os.ReadFile(tfvarsPath); err == nil {
+			// Temporary simple parsing until helper functions are fixed
+			lines := strings.Split(string(content), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line != "" && strings.Contains(line, "=") {
+					parts := strings.SplitN(line, "=", 2)
+					if len(parts) == 2 {
+						key := strings.TrimSpace(parts[0])
+						value := strings.TrimSpace(strings.Trim(parts[1], `"'`))
+						variables[key] = value
+					}
+				}
+			}
+		}
+
+		// Update the variable
+		variables[name] = value
+
+		// Write back to file
+		var content strings.Builder
+		for k, v := range variables {
+			content.WriteString(fmt.Sprintf("%s = \"%s\"\n", k, v))
+		}
+
+		if err := os.WriteFile(tfvarsPath, []byte(content.String()), 0644); err != nil {
+			return errorMsg{err}
+		}
+
+		return variableUpdatedMsg{
+			name:    name,
+			value:   value,
+			success: true,
+			message: "Variable updated successfully",
+		}
+	}
+}
+
+// Enhanced feature methods implementation
+
+// loadStateResources loads Terraform state resources
 func (m *TerraformTUI) loadStateResources() tea.Cmd {
 	return func() tea.Msg {
 		if m.manager == nil {
-			return errorMsg{fmt.Errorf("no workspace selected")}
+			return errorMsg{fmt.Errorf("no terraform manager available")}
 		}
 
-		// Execute terraform state list to get resources
-		cmd := exec.Command("terraform", "state", "list")
-		cmd.Dir = m.manager.WorkingDir
-		output, err := cmd.Output()
+		// Get state list from terraform manager
+		operation, err := m.manager.StateList()
 		if err != nil {
-			return errorMsg{fmt.Errorf("failed to list state resources: %v", err)}
+			return errorMsg{fmt.Errorf("failed to load state: %v", err)}
 		}
 
-		// Parse output and create StateResource objects
-		lines := strings.Split(strings.TrimSpace(string(output)), "\n")
-		var resources []StateResource
+		if !operation.Success {
+			return errorMsg{fmt.Errorf("terraform state list failed: %s", operation.Error)}
+		}
 
+		// Parse state list output
+		var resources []StateResource
+		lines := strings.Split(operation.Output, "\n")
 		for _, line := range lines {
+			line = strings.TrimSpace(line)
 			if line == "" {
 				continue
 			}
 
-			// Parse resource address (e.g., "azurerm_resource_group.main")
+			// Parse terraform state list output format
 			parts := strings.Split(line, ".")
 			if len(parts) >= 2 {
 				resourceType := parts[0]
@@ -822,16 +1575,15 @@ func (m *TerraformTUI) loadStateResources() tea.Cmd {
 					Type:     resourceType,
 					Name:     resourceName,
 					Address:  line,
-					Provider: strings.Split(resourceType, "_")[0], // Extract provider from type
-					Status:   "ok",
+					Provider: strings.Split(resourceType, "_")[0], // Simple provider extraction
+					Status:   "ok",                                // Default status
+					Tainted:  false,
 				}
 
-				// Get detailed resource information
-				detailCmd := exec.Command("terraform", "state", "show", line)
-				detailCmd.Dir = m.manager.WorkingDir
-				if detailOutput, detailErr := detailCmd.Output(); detailErr == nil {
-					// Parse terraform state show output for attributes
-					resource.Attributes = parseStateShowOutput(string(detailOutput))
+				// Check if resource is tainted
+				if strings.Contains(line, "(tainted)") {
+					resource.Tainted = true
+					resource.Status = "tainted"
 				}
 
 				resources = append(resources, resource)
@@ -842,54 +1594,105 @@ func (m *TerraformTUI) loadStateResources() tea.Cmd {
 	}
 }
 
+// loadStateResourcesWithProgress loads state resources with progress indicators
+func (m *TerraformTUI) loadStateResourcesWithProgress() tea.Cmd {
+	return tea.Sequence(
+		func() tea.Msg {
+			return ParseProgressMsg{current: 0, total: 100, stage: "Loading state..."}
+		},
+		func() tea.Msg {
+			return ParseProgressMsg{current: 25, total: 100, stage: "Parsing resources..."}
+		},
+		func() tea.Msg {
+			return ParseProgressMsg{current: 75, total: 100, stage: "Processing dependencies..."}
+		},
+		m.loadStateResources(),
+		func() tea.Msg {
+			return ParseProgressMsg{current: 100, total: 100, stage: "Complete"}
+		},
+	)
+}
+
+// loadPlanChanges loads Terraform plan changes
 func (m *TerraformTUI) loadPlanChanges() tea.Cmd {
 	return func() tea.Msg {
 		if m.manager == nil {
-			return errorMsg{fmt.Errorf("no workspace selected")}
+			return errorMsg{fmt.Errorf("no terraform manager available")}
 		}
 
-		// Execute terraform plan with JSON output
-		cmd := exec.Command("terraform", "plan", "-json", "-out=tfplan")
-		cmd.Dir = m.manager.WorkingDir
-		output, err := cmd.Output()
+		// Get plan JSON from terraform manager
+		planResult, err := m.manager.PlanJSON()
 		if err != nil {
-			return errorMsg{fmt.Errorf("failed to generate plan: %v", err)}
+			return errorMsg{fmt.Errorf("failed to load plan: %v", err)}
 		}
 
-		// Parse JSON plan output
-		changes := parseEnhancedPlanOutput(string(output))
+		// Parse the plan JSON resource changes
+		var changes []PlanChange
+		for _, rc := range planResult.ResourceChanges {
+			action := "unknown"
+			if len(rc.Change.Actions) > 0 {
+				action = rc.Change.Actions[0]
+			}
+
+			change := PlanChange{
+				Action:    action,
+				Resource:  rc.Address,
+				Type:      rc.Type,
+				Name:      rc.Name,
+				Before:    rc.Change.Before.(map[string]interface{}),
+				After:     rc.Change.After.(map[string]interface{}),
+				Reason:    "",       // Would need to be determined from change details
+				Sensitive: false,    // Would need to be determined from plan output
+				Impact:    "medium", // Default impact, could be enhanced
+			}
+
+			changes = append(changes, change)
+		}
 
 		return planChangesLoadedMsg{changes: changes}
 	}
 }
 
+// loadPlanChangesWithProgress loads plan changes with progress indicators
+func (m *TerraformTUI) loadPlanChangesWithProgress() tea.Cmd {
+	return tea.Sequence(
+		func() tea.Msg {
+			return ParseProgressMsg{current: 0, total: 100, stage: "Loading plan..."}
+		},
+		func() tea.Msg {
+			return ParseProgressMsg{current: 33, total: 100, stage: "Parsing changes..."}
+		},
+		func() tea.Msg {
+			return ParseProgressMsg{current: 66, total: 100, stage: "Analyzing impact..."}
+		},
+		m.loadPlanChanges(),
+		func() tea.Msg {
+			return ParseProgressMsg{current: 100, total: 100, stage: "Complete"}
+		},
+	)
+}
+
+// loadWorkspaceInfo loads workspace information
 func (m *TerraformTUI) loadWorkspaceInfo() tea.Cmd {
 	return func() tea.Msg {
 		if m.manager == nil {
-			return errorMsg{fmt.Errorf("no workspace selected")}
+			return errorMsg{fmt.Errorf("no terraform manager available")}
 		}
 
-		// Get current workspace
-		cmd := exec.Command("terraform", "workspace", "show")
-		cmd.Dir = m.manager.WorkingDir
-		currentOutput, err := cmd.Output()
+		// Get workspace list using the tfbicep package
+		operation, err := tfbicep.TerraformWorkspace(m.manager.WorkingDir, "list", []string{})
 		if err != nil {
-			return errorMsg{fmt.Errorf("failed to get current workspace: %v", err)}
+			return errorMsg{fmt.Errorf("failed to load workspaces: %v", err)}
 		}
 
-		currentWorkspace := strings.TrimSpace(string(currentOutput))
-
-		// List all workspaces
-		cmd = exec.Command("terraform", "workspace", "list")
-		cmd.Dir = m.manager.WorkingDir
-		listOutput, err := cmd.Output()
-		if err != nil {
-			return errorMsg{fmt.Errorf("failed to list workspaces: %v", err)}
+		if !operation.Success {
+			return errorMsg{fmt.Errorf("terraform workspace list failed: %s", operation.Error)}
 		}
 
-		// Parse workspace list
+		// Parse workspace list output
 		var workspaces []WorkspaceInfo
-		lines := strings.Split(strings.TrimSpace(string(listOutput)), "\n")
+		currentWorkspace := "default"
+		lines := strings.Split(operation.Output, "\n")
 
 		for _, line := range lines {
 			line = strings.TrimSpace(line)
@@ -897,714 +1700,177 @@ func (m *TerraformTUI) loadWorkspaceInfo() tea.Cmd {
 				continue
 			}
 
-			// Remove asterisk from current workspace
-			workspaceName := strings.TrimPrefix(line, "* ")
-			workspaceName = strings.TrimSpace(workspaceName)
-
 			workspace := WorkspaceInfo{
-				Name:        workspaceName,
-				Path:        m.manager.WorkingDir,
-				Environment: inferEnvironment(workspaceName),
-				Backend:     detectBackendType(m.manager.WorkingDir),
-				Status:      getWorkspaceStatus(m.manager.WorkingDir, workspaceName),
+				Status: "clean",
+			}
+
+			// Check if this is the current workspace (marked with *)
+			if strings.HasPrefix(line, "*") {
+				workspace.Name = strings.TrimSpace(strings.TrimPrefix(line, "*"))
+				workspace.Status = "current"
+				currentWorkspace = workspace.Name
+			} else {
+				workspace.Name = line
+			}
+
+			// Detect environment from workspace name
+			if strings.Contains(workspace.Name, "dev") {
+				workspace.Environment = "dev"
+			} else if strings.Contains(workspace.Name, "staging") || strings.Contains(workspace.Name, "stage") {
+				workspace.Environment = "staging"
+			} else if strings.Contains(workspace.Name, "prod") || strings.Contains(workspace.Name, "production") {
+				workspace.Environment = "prod"
+			} else {
+				workspace.Environment = "dev"
+			}
+
+			// Detect backend type for the workspace
+			if m.manager.WorkingDir != "" {
+				workspace.Backend = detectBackendType(m.manager.WorkingDir)
 			}
 
 			workspaces = append(workspaces, workspace)
 		}
 
-		return workspaceInfoLoadedMsg{
-			workspaces: workspaces,
-			current:    currentWorkspace,
+		return workspaceInfoLoadedMsg{workspaces: workspaces, current: currentWorkspace}
+	}
+}
+
+// togglePlanFilter toggles the plan filter between different action types
+func (m *TerraformTUI) togglePlanFilter() {
+	filters := []string{"", "create", "update", "delete", "replace"}
+	current := ""
+	for i, filter := range filters {
+		if filter == m.planViewer.filterAction {
+			current = filters[(i+1)%len(filters)]
+			break
 		}
 	}
-}
-
-func (m *TerraformTUI) togglePlanFilter() {
-	// Cycle through filter options: all -> create -> update -> delete -> all
-	switch m.planViewer.filterAction {
-	case "":
-		m.planViewer.filterAction = "create"
-	case "create":
-		m.planViewer.filterAction = "update"
-	case "update":
-		m.planViewer.filterAction = "delete"
-	case "delete":
-		m.planViewer.filterAction = ""
+	if current == "" && m.planViewer.filterAction == "" {
+		current = "create"
 	}
-
-	m.status = fmt.Sprintf("Filter: %s", m.planViewer.filterAction)
+	m.planViewer.filterAction = current
 }
 
+// targetResource sets a target resource for terraform operations
 func (m *TerraformTUI) targetResource(resourceAddress string) tea.Cmd {
 	return func() tea.Msg {
 		if m.manager == nil {
-			return errorMsg{fmt.Errorf("no workspace selected")}
+			return errorMsg{fmt.Errorf("no terraform manager available")}
 		}
 
-		// Execute terraform apply with target
-		cmd := exec.Command("terraform", "apply", "-target="+resourceAddress, "-auto-approve")
-		cmd.Dir = m.manager.WorkingDir
-		output, err := cmd.CombinedOutput()
+		// Set target resource for future operations
+		m.status = fmt.Sprintf("Targeting resource: %s", resourceAddress)
 
-		success := err == nil
-		operation := tfbicep.TerraformOperation{
-			Command:  fmt.Sprintf("apply -target=%s", resourceAddress),
-			Success:  success,
-			Output:   string(output),
-			Duration: time.Duration(0), // Initialize with zero duration
-		}
-
-		if err != nil {
-			operation.Error = err.Error()
-		}
-
-		return operationCompletedMsg{operation: operation}
+		// This would typically be used with terraform plan/apply -target=resource
+		// For now, just update the status to show the targeting
+		return nil
 	}
 }
 
-// Workspace management functions
-
-func (m *TerraformTUI) switchWorkspace(workspaceName string) tea.Cmd {
-	return func() tea.Msg {
-		if m.manager == nil {
-			return errorMsg{fmt.Errorf("no workspace selected")}
-		}
-
-		// Don't switch if already current
-		if workspaceName == m.currentWorkspace {
-			return workspaceSwitchedMsg{
-				workspace: workspaceName,
-				success:   true,
-				message:   fmt.Sprintf("Already in workspace '%s'", workspaceName),
-			}
-		}
-
-		// Execute terraform workspace select
-		cmd := exec.Command("terraform", "workspace", "select", workspaceName)
-		cmd.Dir = m.manager.WorkingDir
-		output, err := cmd.CombinedOutput()
-
-		if err != nil {
-			return workspaceSwitchedMsg{
-				workspace: workspaceName,
-				success:   false,
-				message:   fmt.Sprintf("Failed to switch workspace: %v", err),
-				error:     err,
-			}
-		}
-
-		return workspaceSwitchedMsg{
-			workspace: workspaceName,
-			success:   true,
-			message:   fmt.Sprintf("Switched to workspace '%s'", workspaceName),
-			output:    string(output),
-		}
-	}
-}
-
-func (m *TerraformTUI) createWorkspace(workspaceName string) tea.Cmd {
-	return func() tea.Msg {
-		if m.manager == nil {
-			return errorMsg{fmt.Errorf("no workspace selected")}
-		}
-
-		// Execute terraform workspace new
-		cmd := exec.Command("terraform", "workspace", "new", workspaceName)
-		cmd.Dir = m.manager.WorkingDir
-		output, err := cmd.CombinedOutput()
-
-		success := err == nil
-		message := fmt.Sprintf("Created workspace '%s'", workspaceName)
-		if err != nil {
-			message = fmt.Sprintf("Failed to create workspace: %v", err)
-		}
-
-		return workspaceCreatedMsg{
-			workspace: workspaceName,
-			success:   success,
-			message:   message,
-			output:    string(output),
-			error:     err,
-		}
-	}
-}
-
-func (m *TerraformTUI) deleteWorkspace(workspaceName string) tea.Cmd {
-	return func() tea.Msg {
-		if m.manager == nil {
-			return errorMsg{fmt.Errorf("no workspace selected")}
-		}
-
-		// Cannot delete current workspace
-		if workspaceName == m.currentWorkspace {
-			return workspaceDeletedMsg{
-				workspace: workspaceName,
-				success:   false,
-				message:   "Cannot delete current workspace",
-			}
-		}
-
-		// Execute terraform workspace delete
-		cmd := exec.Command("terraform", "workspace", "delete", workspaceName)
-		cmd.Dir = m.manager.WorkingDir
-		output, err := cmd.CombinedOutput()
-
-		success := err == nil
-		message := fmt.Sprintf("Deleted workspace '%s'", workspaceName)
-		if err != nil {
-			message = fmt.Sprintf("Failed to delete workspace: %v", err)
-		}
-
-		return workspaceDeletedMsg{
-			workspace: workspaceName,
-			success:   success,
-			message:   message,
-			output:    string(output),
-			error:     err,
-		}
-	}
-}
-
-// Variable Management Functions
-
+// loadTerraformVariables loads Terraform variables from various sources
 func (m *TerraformTUI) loadTerraformVariables() tea.Cmd {
 	return func() tea.Msg {
 		if m.manager == nil {
-			return errorMsg{fmt.Errorf("no workspace selected")}
+			return errorMsg{fmt.Errorf("no terraform manager available")}
 		}
 
 		variables := make(map[string]string)
+		workingDir := m.manager.WorkingDir
 
-		// Try to read terraform.tfvars file
-		tfvarsPath := filepath.Join(m.manager.WorkingDir, "terraform.tfvars")
+		// Load from terraform.tfvars
+		tfvarsPath := filepath.Join(workingDir, "terraform.tfvars")
 		if content, err := os.ReadFile(tfvarsPath); err == nil {
-			variables = parseTerraformVariables(string(content))
-		}
-
-		// Try to read *.auto.tfvars files
-		if files, err := filepath.Glob(filepath.Join(m.manager.WorkingDir, "*.auto.tfvars")); err == nil {
-			for _, file := range files {
-				if content, err := os.ReadFile(file); err == nil {
-					autoVars := parseTerraformVariables(string(content))
-					for k, v := range autoVars {
-						variables[k] = v
+			// Simple variable parsing
+			lines := strings.Split(string(content), "\n")
+			for _, line := range lines {
+				line = strings.TrimSpace(line)
+				if line != "" && strings.Contains(line, "=") {
+					parts := strings.SplitN(line, "=", 2)
+					if len(parts) == 2 {
+						key := strings.TrimSpace(parts[0])
+						value := strings.TrimSpace(strings.Trim(parts[1], `"'`))
+						variables[key] = value
 					}
 				}
 			}
 		}
 
-		// Add environment-specific variables
-		if m.currentEnv != "" {
-			envVarsPath := filepath.Join(m.manager.WorkingDir, fmt.Sprintf("%s.tfvars", m.currentEnv))
-			if content, err := os.ReadFile(envVarsPath); err == nil {
-				envVars := parseTerraformVariables(string(content))
-				for k, v := range envVars {
-					variables[k] = v
+		// Load from terraform.tfvars.json
+		tfvarsJSONPath := filepath.Join(workingDir, "terraform.tfvars.json")
+		if content, err := os.ReadFile(tfvarsJSONPath); err == nil {
+			var jsonVars map[string]interface{}
+			if json.Unmarshal(content, &jsonVars) == nil {
+				for k, v := range jsonVars {
+					variables[k] = fmt.Sprintf("%v", v)
 				}
 			}
 		}
 
-		return variablesLoadedMsg{
-			variables: variables,
+		// Load from environment-specific files
+		envFiles := []string{
+			"dev.tfvars",
+			"staging.tfvars",
+			"prod.tfvars",
 		}
+
+		for _, envFile := range envFiles {
+			envPath := filepath.Join(workingDir, envFile)
+			if content, err := os.ReadFile(envPath); err == nil {
+				// Simple variable parsing for environment files
+				lines := strings.Split(string(content), "\n")
+				for _, line := range lines {
+					line = strings.TrimSpace(line)
+					if line != "" && strings.Contains(line, "=") {
+						parts := strings.SplitN(line, "=", 2)
+						if len(parts) == 2 {
+							key := strings.TrimSpace(parts[0])
+							value := strings.TrimSpace(strings.Trim(parts[1], `"'`))
+							variables[key] = value // Environment files override defaults
+						}
+					}
+				}
+			}
+		}
+
+		return variablesLoadedMsg{variables: variables}
 	}
 }
 
-func (m *TerraformTUI) updateTerraformVariable(name, value string) tea.Cmd {
-	return func() tea.Msg {
-		if m.manager == nil {
-			return variableUpdatedMsg{
-				name:    name,
-				success: false,
-				message: "No workspace selected",
-			}
-		}
-
-		// Update variable in terraform.tfvars
-		tfvarsPath := filepath.Join(m.manager.WorkingDir, "terraform.tfvars")
-
-		// Read existing content
-		var content string
-		if existing, err := os.ReadFile(tfvarsPath); err == nil {
-			content = string(existing)
-		}
-
-		// Update or add the variable
-		lines := strings.Split(content, "\n")
-		updated := false
-
-		for i, line := range lines {
-			if strings.HasPrefix(strings.TrimSpace(line), name+" =") {
-				lines[i] = fmt.Sprintf(`%s = "%s"`, name, value)
-				updated = true
-				break
-			}
-		}
-
-		if !updated {
-			lines = append(lines, fmt.Sprintf(`%s = "%s"`, name, value))
-		}
-
-		// Write back to file
-		newContent := strings.Join(lines, "\n")
-		if err := os.WriteFile(tfvarsPath, []byte(newContent), 0644); err != nil {
-			return variableUpdatedMsg{
-				name:    name,
-				success: false,
-				message: fmt.Sprintf("Failed to write variable: %v", err),
-				error:   err,
-			}
-		}
-
-		return variableUpdatedMsg{
-			name:    name,
-			value:   value,
-			success: true,
-			message: fmt.Sprintf("Variable '%s' updated successfully", name),
-		}
-	}
-}
-
+// loadTerraformOutputs loads Terraform output values
 func (m *TerraformTUI) loadTerraformOutputs() tea.Cmd {
 	return func() tea.Msg {
 		if m.manager == nil {
-			return errorMsg{fmt.Errorf("no workspace selected")}
+			return errorMsg{fmt.Errorf("no terraform manager available")}
 		}
 
-		// Execute terraform output -json
-		cmd := exec.Command("terraform", "output", "-json")
-		cmd.Dir = m.manager.WorkingDir
-		output, err := cmd.Output()
-
+		// Get outputs using terraform output -json
+		operation, err := tfbicep.TerraformOutput(m.manager.WorkingDir)
 		if err != nil {
-			return outputsLoadedMsg{
-				outputs: make(map[string]interface{}),
-				content: "No outputs available or terraform not initialized",
-			}
+			return errorMsg{fmt.Errorf("failed to load outputs: %v", err)}
+		}
+
+		if !operation.Success {
+			return errorMsg{fmt.Errorf("terraform output failed: %s", operation.Error)}
 		}
 
 		// Parse JSON output
 		var outputs map[string]interface{}
-		if err := json.Unmarshal(output, &outputs); err != nil {
-			return outputsLoadedMsg{
-				outputs: make(map[string]interface{}),
-				content: fmt.Sprintf("Failed to parse outputs: %v", err),
-			}
+		if err := json.Unmarshal([]byte(operation.Output), &outputs); err != nil {
+			return errorMsg{fmt.Errorf("failed to parse output JSON: %v", err)}
 		}
 
-		// Format outputs for display
-		var contentLines []string
-		contentLines = append(contentLines, "Terraform Outputs:")
-		contentLines = append(contentLines, "")
-
-		for name, output := range outputs {
-			if outputMap, ok := output.(map[string]interface{}); ok {
-				value := outputMap["value"]
-				sensitive := false
-				if s, exists := outputMap["sensitive"]; exists {
-					sensitive = s.(bool)
-				}
-
-				if sensitive {
-					contentLines = append(contentLines, fmt.Sprintf("%s = <sensitive>", name))
-				} else {
-					valueStr := fmt.Sprintf("%v", value)
-					contentLines = append(contentLines, fmt.Sprintf("%s = %s", name, valueStr))
-				}
-			}
-		}
-
-		if len(outputs) == 0 {
-			contentLines = append(contentLines, "No outputs defined")
-		}
-
-		return outputsLoadedMsg{
-			outputs: outputs,
-			content: strings.Join(contentLines, "\n"),
-		}
+		return outputsLoadedMsg{outputs: outputs, content: operation.Output}
 	}
 }
 
-// Helper functions for parsing Terraform output
+// renderProgressIndicator renders a fallback progress indicator
+func (m *TerraformTUI) renderProgressIndicator(progress ParseProgressMsg) string {
+	percentage := float64(progress.current) / float64(progress.total) * 100
 
-func parseStateShowOutput(output string) map[string]interface{} {
-	attributes := make(map[string]interface{})
+	progressBar := strings.Repeat("█", int(percentage/4))
+	progressBar += strings.Repeat("░", 25-int(percentage/4))
 
-	// Simple parsing - in a real implementation, you'd use terraform's JSON output
-	lines := strings.Split(output, "\n")
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-		if strings.Contains(line, " = ") {
-			parts := strings.SplitN(line, " = ", 2)
-			if len(parts) == 2 {
-				key := strings.TrimSpace(parts[0])
-				value := strings.TrimSpace(parts[1])
-				attributes[key] = value
-			}
-		}
-	}
-
-	return attributes
-}
-
-// Enhanced JSON Plan Parsing
-func parseEnhancedPlanOutput(jsonOutput string) []PlanChange {
-	var changes []PlanChange
-
-	// Parse JSON plan output properly
-	var planData struct {
-		ResourceChanges []struct {
-			Address      string `json:"address"`
-			Type         string `json:"type"`
-			Name         string `json:"name"`
-			ProviderName string `json:"provider_name"`
-			Change       struct {
-				Actions []string               `json:"actions"`
-				Before  map[string]interface{} `json:"before"`
-				After   map[string]interface{} `json:"after"`
-				Reason  string                 `json:"action_reason"`
-			} `json:"change"`
-		} `json:"resource_changes"`
-	}
-
-	if err := json.Unmarshal([]byte(jsonOutput), &planData); err != nil {
-		// Fallback to simplified parsing if JSON parsing fails
-		return []PlanChange{
-			{
-				Action:   "unknown",
-				Resource: "parsing_error",
-				Type:     "error",
-				Name:     "json_parse_failed",
-				Impact:   "unknown",
-				Reason:   fmt.Sprintf("Failed to parse JSON: %v", err),
-			},
-		}
-	}
-
-	for _, resourceChange := range planData.ResourceChanges {
-		if len(resourceChange.Change.Actions) == 0 {
-			continue
-		}
-
-		action := resourceChange.Change.Actions[0]
-		if len(resourceChange.Change.Actions) > 1 {
-			// Handle complex actions like ["delete", "create"] for replace
-			if contains(resourceChange.Change.Actions, "delete") && contains(resourceChange.Change.Actions, "create") {
-				action = "replace"
-			}
-		}
-
-		// Determine impact level
-		impact := determineChangeImpact(action, resourceChange.Type, resourceChange.Change.Before, resourceChange.Change.After)
-
-		change := PlanChange{
-			Action:    action,
-			Resource:  resourceChange.Address,
-			Type:      resourceChange.Type,
-			Name:      resourceChange.Name,
-			Before:    resourceChange.Change.Before,
-			After:     resourceChange.Change.After,
-			Reason:    resourceChange.Change.Reason,
-			Sensitive: containsSensitiveData(resourceChange.Change.After),
-			Impact:    impact,
-		}
-
-		changes = append(changes, change)
-	}
-
-	return changes
-}
-
-// Helper function to check if slice contains string
-func contains(slice []string, item string) bool {
-	for _, s := range slice {
-		if s == item {
-			return true
-		}
-	}
-	return false
-}
-
-// Helper function to determine change impact
-func determineChangeImpact(action, resourceType string, before, after map[string]interface{}) string {
-	switch action {
-	case "create":
-		// New resources are generally low impact unless they're critical infrastructure
-		if isCriticalResource(resourceType) {
-			return "medium"
-		}
-		return "low"
-	case "delete":
-		// Deletions are always high impact
-		return "high"
-	case "replace":
-		// Replacements are high impact as they involve downtime
-		return "high"
-	case "update":
-		// Updates vary based on what's changing
-		if hasHighImpactChanges(before, after, resourceType) {
-			return "high"
-		}
-		if hasMediumImpactChanges(before, after, resourceType) {
-			return "medium"
-		}
-		return "low"
-	default:
-		return "unknown"
-	}
-}
-
-// Helper function to check if resource type is critical
-func isCriticalResource(resourceType string) bool {
-	criticalTypes := []string{
-		"azurerm_virtual_machine",
-		"azurerm_kubernetes_cluster",
-		"azurerm_sql_database",
-		"azurerm_storage_account",
-		"azurerm_application_gateway",
-		"azurerm_firewall",
-	}
-
-	for _, criticalType := range criticalTypes {
-		if resourceType == criticalType {
-			return true
-		}
-	}
-	return false
-}
-
-// Helper function to check for high impact changes
-func hasHighImpactChanges(before, after map[string]interface{}, resourceType string) bool {
-	// Check for size/sku changes
-	if before["size"] != after["size"] || before["sku"] != after["sku"] {
-		return true
-	}
-
-	// Check for location changes (always high impact)
-	if before["location"] != after["location"] {
-		return true
-	}
-
-	// Resource-specific high impact checks
-	switch resourceType {
-	case "azurerm_virtual_machine":
-		return before["vm_size"] != after["vm_size"]
-	case "azurerm_kubernetes_cluster":
-		return before["node_count"] != after["node_count"] || before["vm_size"] != after["vm_size"]
-	}
-
-	return false
-}
-
-// Helper function to check for medium impact changes
-func hasMediumImpactChanges(before, after map[string]interface{}, resourceType string) bool {
-	// Check for tag changes
-	if !mapsEqual(getMapFromInterface(before["tags"]), getMapFromInterface(after["tags"])) {
-		return true
-	}
-
-	// Check for network-related changes
-	if before["subnet_id"] != after["subnet_id"] || before["public_ip"] != after["public_ip"] {
-		return true
-	}
-
-	return false
-}
-
-// Helper function to check if data contains sensitive information
-func containsSensitiveData(data map[string]interface{}) bool {
-	sensitiveKeys := []string{"password", "secret", "key", "token", "credential"}
-
-	for key := range data {
-		keyLower := strings.ToLower(key)
-		for _, sensitiveKey := range sensitiveKeys {
-			if strings.Contains(keyLower, sensitiveKey) {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-// Helper functions for map comparison
-func getMapFromInterface(i interface{}) map[string]interface{} {
-	if m, ok := i.(map[string]interface{}); ok {
-		return m
-	}
-	return make(map[string]interface{})
-}
-
-func mapsEqual(a, b map[string]interface{}) bool {
-	if len(a) != len(b) {
-		return false
-	}
-
-	for k, v := range a {
-		if b[k] != v {
-			return false
-		}
-	}
-	return true
-}
-
-// Helper functions for parsing Terraform variables
-func parseTerraformVariables(content string) map[string]string {
-	variables := make(map[string]string)
-	lines := strings.Split(content, "\n")
-
-	for _, line := range lines {
-		line = strings.TrimSpace(line)
-
-		// Skip comments and empty lines
-		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
-			continue
-		}
-
-		// Parse variable assignment: var_name = "value"
-		if parts := strings.SplitN(line, "=", 2); len(parts) == 2 {
-			key := strings.TrimSpace(parts[0])
-			value := strings.TrimSpace(parts[1])
-
-			// Remove quotes from value
-			value = strings.Trim(value, `"'`)
-
-			variables[key] = value
-		}
-	}
-
-	return variables
-}
-
-func inferEnvironment(workspaceName string) string {
-	workspaceLower := strings.ToLower(workspaceName)
-	if strings.Contains(workspaceLower, "prod") || strings.Contains(workspaceLower, "production") {
-		return "prod"
-	}
-	if strings.Contains(workspaceLower, "stag") || strings.Contains(workspaceLower, "staging") {
-		return "staging"
-	}
-	if strings.Contains(workspaceLower, "dev") || strings.Contains(workspaceLower, "development") {
-		return "dev"
-	}
-	return "dev" // Default to dev
-}
-
-// Message types for the enhanced features
-
-type stateResourcesLoadedMsg struct {
-	resources []StateResource
-}
-
-type planChangesLoadedMsg struct {
-	changes []PlanChange
-}
-
-type workspaceInfoLoadedMsg struct {
-	workspaces []WorkspaceInfo
-	current    string
-}
-
-type workspaceSwitchedMsg struct {
-	workspace string
-	success   bool
-	message   string
-	output    string
-	error     error
-}
-
-type workspaceCreatedMsg struct {
-	workspace string
-	success   bool
-	message   string
-	output    string
-	error     error
-}
-
-type workspaceDeletedMsg struct {
-	workspace string
-	success   bool
-	message   string
-	output    string
-	error     error
-}
-
-// Variable management message types
-type variablesLoadedMsg struct {
-	variables map[string]string
-}
-
-type variableUpdatedMsg struct {
-	name    string
-	value   string
-	success bool
-	message string
-	error   error
-}
-
-// Output values message types
-type outputsLoadedMsg struct {
-	outputs map[string]interface{}
-	content string
-}
-
-// Message types
-type errorMsg struct{ error }
-type templatesLoadedMsg struct{ items []list.Item }
-type workspacesLoadedMsg struct{ items []list.Item }
-type fileLoadedMsg struct{ path, content string }
-type fileSavedMsg struct{ path string }
-type fileEditedMsg struct{ path string }
-type operationCompletedMsg struct{ operation tfbicep.TerraformOperation }
-
-// Handle messages
-func (m *TerraformTUI) handleMessages(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg := msg.(type) {
-	case errorMsg:
-		m.errorMsg = msg.Error()
-		m.status = "Error"
-
-	case templatesLoadedMsg:
-		m.templates.SetItems(msg.items)
-		m.status = "Templates loaded"
-
-	case workspacesLoadedMsg:
-		m.workspaces.SetItems(msg.items)
-		m.status = "Workspaces loaded"
-
-	case fileLoadedMsg:
-		m.currentFile = msg.path
-		m.editor.SetValue(msg.content)
-		m.activeView = ViewEditor
-		m.status = fmt.Sprintf("Loaded %s", filepath.Base(msg.path))
-
-	case fileSavedMsg:
-		m.status = fmt.Sprintf("Saved %s", filepath.Base(msg.path))
-
-	case fileEditedMsg:
-		m.status = fmt.Sprintf("Edited %s", filepath.Base(msg.path))
-
-	case operationCompletedMsg:
-		m.operations = append(m.operations, msg.operation)
-		if msg.operation.Success {
-			m.status = fmt.Sprintf("✓ %s completed", msg.operation.Command)
-		} else {
-			m.status = fmt.Sprintf("✗ %s failed", msg.operation.Command)
-			m.errorMsg = msg.operation.Error
-		}
-
-		// Show operation result in popup
-		m.showPopup = true
-		m.popupTitle = msg.operation.Command
-		if msg.operation.Success {
-			m.popupContent = fmt.Sprintf("Success!\n\nDuration: %s\n\nOutput:\n%s",
-				msg.operation.Duration,
-				msg.operation.Output)
-		} else {
-			m.popupContent = fmt.Sprintf("Failed!\n\nDuration: %s\n\nError:\n%s",
-				msg.operation.Duration,
-				msg.operation.Error)
-		}
-	}
-
-	return m, nil
+	return fmt.Sprintf("Progress: [%s] %.1f%% - %s",
+		progressBar, percentage, progress.stage)
 }

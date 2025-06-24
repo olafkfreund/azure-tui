@@ -2,6 +2,7 @@ package terraform
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
@@ -70,6 +71,113 @@ type WorkspaceInfo struct {
 	Status      string            `json:"status"` // "clean", "dirty", "error"
 }
 
+// Enhanced Variable Management Types
+type VariableEditor struct {
+	variables     map[string]string
+	selectedIndex int
+	editMode      bool
+	editingVar    string
+	editingValue  string
+	originalValue string
+	showConfirm   bool
+}
+
+// Progress indicator for performance tracking
+type ProgressIndicator struct {
+	isActive   bool
+	current    int
+	total      int
+	stage      string
+	lastUpdate time.Time
+}
+
+// Performance optimization settings
+type PerformanceConfig struct {
+	enableProgressIndicators bool
+	batchSize                int
+	cacheSize                int
+	streamingThreshold       int // bytes
+}
+
+// ParseProgressMsg represents progress while parsing large plan files
+type ParseProgressMsg struct {
+	current int
+	total   int
+	stage   string
+}
+
+// Message types for variable management and progress tracking
+type variableEditCompletedMsg struct {
+	name  string
+	value string
+}
+
+// Additional message types for Terraform operations
+type errorMsg struct{ error }
+type templatesLoadedMsg struct{ items []list.Item }
+type workspacesLoadedMsg struct{ items []list.Item }
+type fileLoadedMsg struct{ path, content string }
+type fileSavedMsg struct{ path string }
+type fileEditedMsg struct{ path string }
+type operationCompletedMsg struct{ operation tfbicep.TerraformOperation }
+
+// Enhanced feature message types
+type stateResourcesLoadedMsg struct {
+	resources []StateResource
+}
+
+type planChangesLoadedMsg struct {
+	changes []PlanChange
+}
+
+type workspaceInfoLoadedMsg struct {
+	workspaces []WorkspaceInfo
+	current    string
+}
+
+type workspaceSwitchedMsg struct {
+	workspace string
+	success   bool
+	message   string
+	output    string
+	error     error
+}
+
+type workspaceCreatedMsg struct {
+	workspace string
+	success   bool
+	message   string
+	output    string
+	error     error
+}
+
+type workspaceDeletedMsg struct {
+	workspace string
+	success   bool
+	message   string
+	output    string
+	error     error
+}
+
+// Variable management message types
+type variablesLoadedMsg struct {
+	variables map[string]string
+}
+
+type variableUpdatedMsg struct {
+	name    string
+	value   string
+	success bool
+	message string
+	error   error
+}
+
+// Output values message types
+type outputsLoadedMsg struct {
+	outputs map[string]interface{}
+	content string
+}
+
 // TerraformTUI represents the Terraform TUI interface
 type TerraformTUI struct {
 	width            int
@@ -106,6 +214,14 @@ type TerraformTUI struct {
 	workspaceManager WorkspaceManager
 	currentEnv       string // dev, staging, prod
 	envVariables     map[string]string
+
+	// Interactive Variable Editing
+	variableEditor VariableEditor
+	showVarEditor  bool
+
+	// Performance and Progress Tracking
+	progressIndicator ProgressIndicator
+	perfConfig        PerformanceConfig
 }
 
 // Views
@@ -118,6 +234,7 @@ const (
 	ViewStateViewer = "state_viewer"
 	ViewPlanViewer  = "plan_viewer"
 	ViewEnvManager  = "env_manager"
+	ViewVarEditor   = "var_editor"
 )
 
 // Key bindings
@@ -156,6 +273,7 @@ type keyMap struct {
 	// Additional enhanced features
 	VariableManager key.Binding
 	OutputViewer    key.Binding
+	EditVariable    key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -296,6 +414,10 @@ var keys = keyMap{
 		key.WithKeys("o"),
 		key.WithHelp("o", "show outputs"),
 	),
+	EditVariable: key.NewBinding(
+		key.WithKeys("e"),
+		key.WithHelp("e", "edit variable"),
+	),
 }
 
 // NewTerraformTUI creates a new Terraform TUI
@@ -317,6 +439,21 @@ func NewTerraformTUI() *TerraformTUI {
 			envVars:    make(map[string]map[string]string),
 		},
 		envVariables: make(map[string]string),
+		variableEditor: VariableEditor{
+			variables: make(map[string]string),
+		},
+		progressIndicator: ProgressIndicator{
+			isActive: false,
+			current:  0,
+			total:    0,
+			stage:    "",
+		},
+		perfConfig: PerformanceConfig{
+			enableProgressIndicators: true,
+			batchSize:                100,
+			cacheSize:                1024,
+			streamingThreshold:       4096,
+		},
 	}
 
 	// Initialize templates list
@@ -416,11 +553,19 @@ func (m *TerraformTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Enhanced feature key bindings
 		case key.Matches(msg, keys.StateViewer):
 			m.activeView = ViewStateViewer
-			return m, m.loadStateResources()
+			if m.perfConfig.enableProgressIndicators {
+				return m, m.loadStateResourcesWithProgress()
+			} else {
+				return m, m.loadStateResources()
+			}
 
 		case key.Matches(msg, keys.PlanViewer):
 			m.activeView = ViewPlanViewer
-			return m, m.loadPlanChanges()
+			if m.perfConfig.enableProgressIndicators {
+				return m, m.loadPlanChangesWithProgress()
+			} else {
+				return m, m.loadPlanChanges()
+			}
 
 		case key.Matches(msg, keys.EnvManager):
 			m.activeView = ViewEnvManager
@@ -447,10 +592,16 @@ func (m *TerraformTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 		case key.Matches(msg, keys.VariableManager):
+			m.activeView = ViewVarEditor
 			return m, m.loadTerraformVariables()
 
 		case key.Matches(msg, keys.OutputViewer):
 			return m, m.loadTerraformOutputs()
+
+		case key.Matches(msg, keys.EditVariable):
+			if m.activeView == ViewVarEditor && !m.variableEditor.editMode {
+				return m, m.startVariableEdit()
+			}
 		}
 
 		// Handle view-specific updates
@@ -473,6 +624,39 @@ func (m *TerraformTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case ViewEditor:
 			m.editor, cmd = m.editor.Update(msg)
+
+		case ViewVarEditor:
+			// Handle variable editor specific key bindings
+			if m.variableEditor.editMode {
+				// In edit mode
+				switch {
+				case key.Matches(msg, keys.Enter):
+					cmd = m.saveVariableEdit()
+				case key.Matches(msg, keys.Escape):
+					m.cancelVariableEdit()
+				default:
+					// Handle text input
+					if len(msg.String()) == 1 {
+						m.variableEditor.editingValue += msg.String()
+					} else if msg.Type == tea.KeyBackspace && len(m.variableEditor.editingValue) > 0 {
+						m.variableEditor.editingValue = m.variableEditor.editingValue[:len(m.variableEditor.editingValue)-1]
+					}
+				}
+			} else {
+				// In navigation mode
+				switch {
+				case key.Matches(msg, keys.Up):
+					if m.variableEditor.selectedIndex > 0 {
+						m.variableEditor.selectedIndex--
+					}
+				case key.Matches(msg, keys.Down):
+					if m.variableEditor.selectedIndex < len(m.variableEditor.variables)-1 {
+						m.variableEditor.selectedIndex++
+					}
+				case key.Matches(msg, keys.EditVariable):
+					cmd = m.startVariableEdit()
+				}
+			}
 		}
 
 		cmds = append(cmds, cmd)
@@ -481,15 +665,26 @@ func (m *TerraformTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case stateResourcesLoadedMsg:
 		m.stateViewer.resources = msg.resources
 		m.status = "State resources loaded"
+		m.progressIndicator.isActive = false
 
 	case planChangesLoadedMsg:
 		m.planViewer.changes = msg.changes
 		m.status = "Plan changes loaded"
+		m.progressIndicator.isActive = false
 
 	case workspaceInfoLoadedMsg:
 		m.workspaceManager.workspaces = msg.workspaces
 		m.currentWorkspace = msg.current
 		m.status = "Workspace info loaded"
+
+	// Progress handling for performance optimization
+	case ParseProgressMsg:
+		m.progressIndicator.isActive = true
+		m.progressIndicator.current = msg.current
+		m.progressIndicator.total = msg.total
+		m.progressIndicator.stage = msg.stage
+		m.progressIndicator.lastUpdate = time.Now()
+		m.status = fmt.Sprintf("%s (%d%%)", msg.stage, int(float64(msg.current)/float64(msg.total)*100))
 
 	// Workspace management messages
 	case workspaceSwitchedMsg:
@@ -523,6 +718,8 @@ func (m *TerraformTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case variablesLoadedMsg:
 		m.envVariables = msg.variables
+		m.variableEditor.variables = msg.variables
+		m.variableEditor.selectedIndex = 0
 		m.status = "Variables loaded"
 
 	case variableUpdatedMsg:
@@ -534,6 +731,9 @@ func (m *TerraformTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.errorMsg = msg.message
 		}
 
+	case variableEditCompletedMsg:
+		m.status = fmt.Sprintf("Variable '%s' successfully updated to '%s'", msg.name, msg.value)
+
 	// Output values messages
 	case outputsLoadedMsg:
 		m.status = "Output values loaded"
@@ -542,8 +742,8 @@ func (m *TerraformTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.popupContent = msg.content
 
 	default:
-		// Handle other message types through the existing handler
-		return m.handleMessages(msg)
+		// For now, just return the model as-is for unhandled messages
+		// This could be enhanced to handle additional message types
 	}
 
 	return m, tea.Batch(cmds...)
@@ -573,8 +773,26 @@ func (m *TerraformTUI) View() string {
 		content = m.renderPlanViewerView()
 	case ViewEnvManager:
 		content = m.renderEnvManagerView()
+	case ViewVarEditor:
+		content = m.renderVarEditorView()
 	default:
 		content = m.renderTemplatesView()
+	}
+
+	// Add progress indicator overlay if active
+	if m.progressIndicator.isActive && m.perfConfig.enableProgressIndicators {
+		progressOverlay := m.renderProgressIndicator(ParseProgressMsg{
+			current: m.progressIndicator.current,
+			total:   m.progressIndicator.total,
+			stage:   m.progressIndicator.stage,
+		})
+
+		content = lipgloss.JoinVertical(
+			lipgloss.Left,
+			content,
+			"",
+			progressOverlay,
+		)
 	}
 
 	return lipgloss.JoinVertical(
@@ -597,7 +815,7 @@ func (m *TerraformTUI) updateSizes() {
 }
 
 func (m *TerraformTUI) nextView() {
-	views := []string{ViewTemplates, ViewWorkspaces, ViewEditor, ViewOperations, ViewState, ViewStateViewer, ViewPlanViewer, ViewEnvManager}
+	views := []string{ViewTemplates, ViewWorkspaces, ViewEditor, ViewOperations, ViewState, ViewStateViewer, ViewPlanViewer, ViewEnvManager, ViewVarEditor}
 	current := 0
 	for i, view := range views {
 		if view == m.activeView {
@@ -609,7 +827,7 @@ func (m *TerraformTUI) nextView() {
 }
 
 func (m *TerraformTUI) prevView() {
-	views := []string{ViewTemplates, ViewWorkspaces, ViewEditor, ViewOperations, ViewState, ViewStateViewer, ViewPlanViewer, ViewEnvManager}
+	views := []string{ViewTemplates, ViewWorkspaces, ViewEditor, ViewOperations, ViewState, ViewStateViewer, ViewPlanViewer, ViewEnvManager, ViewVarEditor}
 	current := 0
 	for i, view := range views {
 		if view == m.activeView {
