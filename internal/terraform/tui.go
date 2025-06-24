@@ -152,6 +152,10 @@ type keyMap struct {
 	FilterToggle   key.Binding
 	ApprovalMode   key.Binding
 	ResourceTarget key.Binding
+
+	// Additional enhanced features
+	VariableManager key.Binding
+	OutputViewer    key.Binding
 }
 
 func (k keyMap) ShortHelp() []key.Binding {
@@ -283,6 +287,14 @@ var keys = keyMap{
 	ResourceTarget: key.NewBinding(
 		key.WithKeys("t"),
 		key.WithHelp("t", "target resource"),
+	),
+	VariableManager: key.NewBinding(
+		key.WithKeys("v"),
+		key.WithHelp("v", "variable manager"),
+	),
+	OutputViewer: key.NewBinding(
+		key.WithKeys("o"),
+		key.WithHelp("o", "show outputs"),
 	),
 }
 
@@ -433,6 +445,12 @@ func (m *TerraformTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if m.activeView == ViewPlanViewer && len(m.planChanges) > 0 {
 				return m, m.targetResource(m.planChanges[m.selectedChange].Resource)
 			}
+
+		case key.Matches(msg, keys.VariableManager):
+			return m, m.loadTerraformVariables()
+
+		case key.Matches(msg, keys.OutputViewer):
+			return m, m.loadTerraformOutputs()
 		}
 
 		// Handle view-specific updates
@@ -472,6 +490,56 @@ func (m *TerraformTUI) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.workspaceManager.workspaces = msg.workspaces
 		m.currentWorkspace = msg.current
 		m.status = "Workspace info loaded"
+
+	// Workspace management messages
+	case workspaceSwitchedMsg:
+		if msg.success {
+			m.currentWorkspace = msg.workspace
+			m.status = msg.message
+			// Reload workspace info after switching
+			cmds = append(cmds, m.loadWorkspaceInfo())
+		} else {
+			m.errorMsg = msg.message
+		}
+
+	case workspaceCreatedMsg:
+		if msg.success {
+			m.status = msg.message
+			// Reload workspace info after creation
+			cmds = append(cmds, m.loadWorkspaceInfo())
+		} else {
+			m.errorMsg = msg.message
+		}
+
+	case workspaceDeletedMsg:
+		if msg.success {
+			m.status = msg.message
+			// Reload workspace info after deletion
+			cmds = append(cmds, m.loadWorkspaceInfo())
+		} else {
+			m.errorMsg = msg.message
+			// Variable management messages
+		}
+
+	case variablesLoadedMsg:
+		m.envVariables = msg.variables
+		m.status = "Variables loaded"
+
+	case variableUpdatedMsg:
+		if msg.success {
+			m.status = fmt.Sprintf("Variable '%s' updated", msg.name)
+			// Reload variables
+			cmds = append(cmds, m.loadTerraformVariables())
+		} else {
+			m.errorMsg = msg.message
+		}
+
+	// Output values messages
+	case outputsLoadedMsg:
+		m.status = "Output values loaded"
+		m.showPopup = true
+		m.popupTitle = "Terraform Outputs"
+		m.popupContent = msg.content
 
 	default:
 		// Handle other message types through the existing handler

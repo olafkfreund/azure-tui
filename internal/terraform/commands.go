@@ -1,6 +1,7 @@
 package terraform
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -391,6 +392,125 @@ func getWorkspaceStatusIcon(status string) string {
 	}
 }
 
+// Helper functions for enhanced workspace management
+
+func detectBackendType(workingDir string) string {
+	// Read terraform configuration files to detect backend type
+	configFiles := []string{"main.tf", "backend.tf", "terraform.tf", "providers.tf"}
+
+	for _, file := range configFiles {
+		filePath := filepath.Join(workingDir, file)
+		if content, err := os.ReadFile(filePath); err == nil {
+			contentStr := string(content)
+
+			// Check for different backend types
+			if strings.Contains(contentStr, `backend "s3"`) {
+				return "s3"
+			}
+			if strings.Contains(contentStr, `backend "azurerm"`) {
+				return "azurerm"
+			}
+			if strings.Contains(contentStr, `backend "gcs"`) {
+				return "gcs"
+			}
+			if strings.Contains(contentStr, `backend "remote"`) {
+				return "remote"
+			}
+			if strings.Contains(contentStr, `backend "http"`) {
+				return "http"
+			}
+			if strings.Contains(contentStr, `backend "consul"`) {
+				return "consul"
+			}
+			if strings.Contains(contentStr, `backend "etcdv3"`) {
+				return "etcdv3"
+			}
+		}
+	}
+
+	// Check for .terraform directory which might contain backend config
+	terraformDir := filepath.Join(workingDir, ".terraform")
+	if _, err := os.Stat(terraformDir); err == nil {
+		// Check terraform.tfstate for backend info
+		if stateFile, err := os.ReadFile(filepath.Join(terraformDir, "terraform.tfstate")); err == nil {
+			if strings.Contains(string(stateFile), `"backend"`) {
+				return "configured"
+			}
+		}
+	}
+
+	return "local"
+}
+
+func getWorkspaceStatus(workingDir, workspaceName string) string {
+	// Check for uncommitted terraform files
+	cmd := exec.Command("git", "status", "--porcelain", "*.tf", "*.tfvars")
+	cmd.Dir = workingDir
+	if output, err := cmd.Output(); err == nil && len(strings.TrimSpace(string(output))) > 0 {
+		return "dirty"
+	}
+
+	// Check if terraform plan shows changes
+	cmd = exec.Command("terraform", "plan", "-detailed-exitcode", "-no-color")
+	cmd.Dir = workingDir
+
+	// Set workspace if not default
+	if workspaceName != "default" {
+		// Switch to workspace temporarily for status check
+		selectCmd := exec.Command("terraform", "workspace", "select", workspaceName)
+		selectCmd.Dir = workingDir
+		selectCmd.Run() // Ignore errors for status check
+	}
+
+	if err := cmd.Run(); err != nil {
+		if exitError, ok := err.(*exec.ExitError); ok {
+			switch exitError.ExitCode() {
+			case 1:
+				return "error"
+			case 2:
+				return "changes-pending"
+			}
+		}
+		return "unknown"
+	}
+
+	return "clean"
+}
+
+func checkStateLock(workingDir string) (bool, string, error) {
+	lockFile := filepath.Join(workingDir, ".terraform", "terraform.tfstate.lock.info")
+
+	if _, err := os.Stat(lockFile); os.IsNotExist(err) {
+		return false, "", nil
+	}
+
+	content, err := os.ReadFile(lockFile)
+	if err != nil {
+		return false, "", err
+	}
+
+	var lockInfo struct {
+		ID        string    `json:"ID"`
+		Operation string    `json:"Operation"`
+		Info      string    `json:"Info"`
+		Who       string    `json:"Who"`
+		Version   string    `json:"Version"`
+		Created   time.Time `json:"Created"`
+	}
+
+	// Try to parse JSON lock info
+	if err := json.Unmarshal(content, &lockInfo); err == nil {
+		return true, fmt.Sprintf("locked by %s", lockInfo.Who), nil
+	}
+
+	// If JSON parsing fails, assume it's locked
+	if len(content) > 0 {
+		return true, "locked", nil
+	}
+
+	return false, "", nil
+}
+
 // Command methods
 
 func (m *TerraformTUI) loadTemplates() tea.Cmd {
@@ -737,7 +857,7 @@ func (m *TerraformTUI) loadPlanChanges() tea.Cmd {
 		}
 
 		// Parse JSON plan output
-		changes := parsePlanOutput(string(output))
+		changes := parseEnhancedPlanOutput(string(output))
 
 		return planChangesLoadedMsg{changes: changes}
 	}
@@ -785,8 +905,8 @@ func (m *TerraformTUI) loadWorkspaceInfo() tea.Cmd {
 				Name:        workspaceName,
 				Path:        m.manager.WorkingDir,
 				Environment: inferEnvironment(workspaceName),
-				Backend:     "local", // TODO: Detect backend type
-				Status:      "clean", // TODO: Check for uncommitted changes
+				Backend:     detectBackendType(m.manager.WorkingDir),
+				Status:      getWorkspaceStatus(m.manager.WorkingDir, workspaceName),
 			}
 
 			workspaces = append(workspaces, workspace)
@@ -842,6 +962,269 @@ func (m *TerraformTUI) targetResource(resourceAddress string) tea.Cmd {
 	}
 }
 
+// Workspace management functions
+
+func (m *TerraformTUI) switchWorkspace(workspaceName string) tea.Cmd {
+	return func() tea.Msg {
+		if m.manager == nil {
+			return errorMsg{fmt.Errorf("no workspace selected")}
+		}
+
+		// Don't switch if already current
+		if workspaceName == m.currentWorkspace {
+			return workspaceSwitchedMsg{
+				workspace: workspaceName,
+				success:   true,
+				message:   fmt.Sprintf("Already in workspace '%s'", workspaceName),
+			}
+		}
+
+		// Execute terraform workspace select
+		cmd := exec.Command("terraform", "workspace", "select", workspaceName)
+		cmd.Dir = m.manager.WorkingDir
+		output, err := cmd.CombinedOutput()
+
+		if err != nil {
+			return workspaceSwitchedMsg{
+				workspace: workspaceName,
+				success:   false,
+				message:   fmt.Sprintf("Failed to switch workspace: %v", err),
+				error:     err,
+			}
+		}
+
+		return workspaceSwitchedMsg{
+			workspace: workspaceName,
+			success:   true,
+			message:   fmt.Sprintf("Switched to workspace '%s'", workspaceName),
+			output:    string(output),
+		}
+	}
+}
+
+func (m *TerraformTUI) createWorkspace(workspaceName string) tea.Cmd {
+	return func() tea.Msg {
+		if m.manager == nil {
+			return errorMsg{fmt.Errorf("no workspace selected")}
+		}
+
+		// Execute terraform workspace new
+		cmd := exec.Command("terraform", "workspace", "new", workspaceName)
+		cmd.Dir = m.manager.WorkingDir
+		output, err := cmd.CombinedOutput()
+
+		success := err == nil
+		message := fmt.Sprintf("Created workspace '%s'", workspaceName)
+		if err != nil {
+			message = fmt.Sprintf("Failed to create workspace: %v", err)
+		}
+
+		return workspaceCreatedMsg{
+			workspace: workspaceName,
+			success:   success,
+			message:   message,
+			output:    string(output),
+			error:     err,
+		}
+	}
+}
+
+func (m *TerraformTUI) deleteWorkspace(workspaceName string) tea.Cmd {
+	return func() tea.Msg {
+		if m.manager == nil {
+			return errorMsg{fmt.Errorf("no workspace selected")}
+		}
+
+		// Cannot delete current workspace
+		if workspaceName == m.currentWorkspace {
+			return workspaceDeletedMsg{
+				workspace: workspaceName,
+				success:   false,
+				message:   "Cannot delete current workspace",
+			}
+		}
+
+		// Execute terraform workspace delete
+		cmd := exec.Command("terraform", "workspace", "delete", workspaceName)
+		cmd.Dir = m.manager.WorkingDir
+		output, err := cmd.CombinedOutput()
+
+		success := err == nil
+		message := fmt.Sprintf("Deleted workspace '%s'", workspaceName)
+		if err != nil {
+			message = fmt.Sprintf("Failed to delete workspace: %v", err)
+		}
+
+		return workspaceDeletedMsg{
+			workspace: workspaceName,
+			success:   success,
+			message:   message,
+			output:    string(output),
+			error:     err,
+		}
+	}
+}
+
+// Variable Management Functions
+
+func (m *TerraformTUI) loadTerraformVariables() tea.Cmd {
+	return func() tea.Msg {
+		if m.manager == nil {
+			return errorMsg{fmt.Errorf("no workspace selected")}
+		}
+
+		variables := make(map[string]string)
+
+		// Try to read terraform.tfvars file
+		tfvarsPath := filepath.Join(m.manager.WorkingDir, "terraform.tfvars")
+		if content, err := os.ReadFile(tfvarsPath); err == nil {
+			variables = parseTerraformVariables(string(content))
+		}
+
+		// Try to read *.auto.tfvars files
+		if files, err := filepath.Glob(filepath.Join(m.manager.WorkingDir, "*.auto.tfvars")); err == nil {
+			for _, file := range files {
+				if content, err := os.ReadFile(file); err == nil {
+					autoVars := parseTerraformVariables(string(content))
+					for k, v := range autoVars {
+						variables[k] = v
+					}
+				}
+			}
+		}
+
+		// Add environment-specific variables
+		if m.currentEnv != "" {
+			envVarsPath := filepath.Join(m.manager.WorkingDir, fmt.Sprintf("%s.tfvars", m.currentEnv))
+			if content, err := os.ReadFile(envVarsPath); err == nil {
+				envVars := parseTerraformVariables(string(content))
+				for k, v := range envVars {
+					variables[k] = v
+				}
+			}
+		}
+
+		return variablesLoadedMsg{
+			variables: variables,
+		}
+	}
+}
+
+func (m *TerraformTUI) updateTerraformVariable(name, value string) tea.Cmd {
+	return func() tea.Msg {
+		if m.manager == nil {
+			return variableUpdatedMsg{
+				name:    name,
+				success: false,
+				message: "No workspace selected",
+			}
+		}
+
+		// Update variable in terraform.tfvars
+		tfvarsPath := filepath.Join(m.manager.WorkingDir, "terraform.tfvars")
+
+		// Read existing content
+		var content string
+		if existing, err := os.ReadFile(tfvarsPath); err == nil {
+			content = string(existing)
+		}
+
+		// Update or add the variable
+		lines := strings.Split(content, "\n")
+		updated := false
+
+		for i, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), name+" =") {
+				lines[i] = fmt.Sprintf(`%s = "%s"`, name, value)
+				updated = true
+				break
+			}
+		}
+
+		if !updated {
+			lines = append(lines, fmt.Sprintf(`%s = "%s"`, name, value))
+		}
+
+		// Write back to file
+		newContent := strings.Join(lines, "\n")
+		if err := os.WriteFile(tfvarsPath, []byte(newContent), 0644); err != nil {
+			return variableUpdatedMsg{
+				name:    name,
+				success: false,
+				message: fmt.Sprintf("Failed to write variable: %v", err),
+				error:   err,
+			}
+		}
+
+		return variableUpdatedMsg{
+			name:    name,
+			value:   value,
+			success: true,
+			message: fmt.Sprintf("Variable '%s' updated successfully", name),
+		}
+	}
+}
+
+func (m *TerraformTUI) loadTerraformOutputs() tea.Cmd {
+	return func() tea.Msg {
+		if m.manager == nil {
+			return errorMsg{fmt.Errorf("no workspace selected")}
+		}
+
+		// Execute terraform output -json
+		cmd := exec.Command("terraform", "output", "-json")
+		cmd.Dir = m.manager.WorkingDir
+		output, err := cmd.Output()
+
+		if err != nil {
+			return outputsLoadedMsg{
+				outputs: make(map[string]interface{}),
+				content: "No outputs available or terraform not initialized",
+			}
+		}
+
+		// Parse JSON output
+		var outputs map[string]interface{}
+		if err := json.Unmarshal(output, &outputs); err != nil {
+			return outputsLoadedMsg{
+				outputs: make(map[string]interface{}),
+				content: fmt.Sprintf("Failed to parse outputs: %v", err),
+			}
+		}
+
+		// Format outputs for display
+		var contentLines []string
+		contentLines = append(contentLines, "Terraform Outputs:")
+		contentLines = append(contentLines, "")
+
+		for name, output := range outputs {
+			if outputMap, ok := output.(map[string]interface{}); ok {
+				value := outputMap["value"]
+				sensitive := false
+				if s, exists := outputMap["sensitive"]; exists {
+					sensitive = s.(bool)
+				}
+
+				if sensitive {
+					contentLines = append(contentLines, fmt.Sprintf("%s = <sensitive>", name))
+				} else {
+					valueStr := fmt.Sprintf("%v", value)
+					contentLines = append(contentLines, fmt.Sprintf("%s = %s", name, valueStr))
+				}
+			}
+		}
+
+		if len(outputs) == 0 {
+			contentLines = append(contentLines, "No outputs defined")
+		}
+
+		return outputsLoadedMsg{
+			outputs: outputs,
+			content: strings.Join(contentLines, "\n"),
+		}
+	}
+}
+
 // Helper functions for parsing Terraform output
 
 func parseStateShowOutput(output string) map[string]interface{} {
@@ -864,49 +1247,232 @@ func parseStateShowOutput(output string) map[string]interface{} {
 	return attributes
 }
 
-func parsePlanOutput(jsonOutput string) []PlanChange {
+// Enhanced JSON Plan Parsing
+func parseEnhancedPlanOutput(jsonOutput string) []PlanChange {
 	var changes []PlanChange
 
-	// Parse JSON plan output - simplified version
-	// In a real implementation, you'd properly parse the Terraform JSON plan format
-	lines := strings.Split(jsonOutput, "\n")
-	for _, line := range lines {
-		if strings.Contains(line, `"change"`) && strings.Contains(line, `"action"`) {
-			// Extract action and resource information
-			change := PlanChange{
-				Action:   "update", // Simplified - would parse from JSON
-				Resource: "example_resource",
-				Type:     "azurerm_resource_group",
-				Name:     "main",
-				Impact:   "medium",
-			}
-			changes = append(changes, change)
+	// Parse JSON plan output properly
+	var planData struct {
+		ResourceChanges []struct {
+			Address      string `json:"address"`
+			Type         string `json:"type"`
+			Name         string `json:"name"`
+			ProviderName string `json:"provider_name"`
+			Change       struct {
+				Actions []string               `json:"actions"`
+				Before  map[string]interface{} `json:"before"`
+				After   map[string]interface{} `json:"after"`
+				Reason  string                 `json:"action_reason"`
+			} `json:"change"`
+		} `json:"resource_changes"`
+	}
+
+	if err := json.Unmarshal([]byte(jsonOutput), &planData); err != nil {
+		// Fallback to simplified parsing if JSON parsing fails
+		return []PlanChange{
+			{
+				Action:   "unknown",
+				Resource: "parsing_error",
+				Type:     "error",
+				Name:     "json_parse_failed",
+				Impact:   "unknown",
+				Reason:   fmt.Sprintf("Failed to parse JSON: %v", err),
+			},
 		}
 	}
 
-	// If no changes found, create some example data for demonstration
-	if len(changes) == 0 {
-		changes = []PlanChange{
-			{
-				Action:   "create",
-				Resource: "azurerm_resource_group.main",
-				Type:     "azurerm_resource_group",
-				Name:     "main",
-				Impact:   "low",
-				Reason:   "Resource does not exist",
-			},
-			{
-				Action:   "update",
-				Resource: "azurerm_virtual_machine.web",
-				Type:     "azurerm_virtual_machine",
-				Name:     "web",
-				Impact:   "high",
-				Reason:   "VM size change",
-			},
+	for _, resourceChange := range planData.ResourceChanges {
+		if len(resourceChange.Change.Actions) == 0 {
+			continue
 		}
+
+		action := resourceChange.Change.Actions[0]
+		if len(resourceChange.Change.Actions) > 1 {
+			// Handle complex actions like ["delete", "create"] for replace
+			if contains(resourceChange.Change.Actions, "delete") && contains(resourceChange.Change.Actions, "create") {
+				action = "replace"
+			}
+		}
+
+		// Determine impact level
+		impact := determineChangeImpact(action, resourceChange.Type, resourceChange.Change.Before, resourceChange.Change.After)
+
+		change := PlanChange{
+			Action:    action,
+			Resource:  resourceChange.Address,
+			Type:      resourceChange.Type,
+			Name:      resourceChange.Name,
+			Before:    resourceChange.Change.Before,
+			After:     resourceChange.Change.After,
+			Reason:    resourceChange.Change.Reason,
+			Sensitive: containsSensitiveData(resourceChange.Change.After),
+			Impact:    impact,
+		}
+
+		changes = append(changes, change)
 	}
 
 	return changes
+}
+
+// Helper function to check if slice contains string
+func contains(slice []string, item string) bool {
+	for _, s := range slice {
+		if s == item {
+			return true
+		}
+	}
+	return false
+}
+
+// Helper function to determine change impact
+func determineChangeImpact(action, resourceType string, before, after map[string]interface{}) string {
+	switch action {
+	case "create":
+		// New resources are generally low impact unless they're critical infrastructure
+		if isCriticalResource(resourceType) {
+			return "medium"
+		}
+		return "low"
+	case "delete":
+		// Deletions are always high impact
+		return "high"
+	case "replace":
+		// Replacements are high impact as they involve downtime
+		return "high"
+	case "update":
+		// Updates vary based on what's changing
+		if hasHighImpactChanges(before, after, resourceType) {
+			return "high"
+		}
+		if hasMediumImpactChanges(before, after, resourceType) {
+			return "medium"
+		}
+		return "low"
+	default:
+		return "unknown"
+	}
+}
+
+// Helper function to check if resource type is critical
+func isCriticalResource(resourceType string) bool {
+	criticalTypes := []string{
+		"azurerm_virtual_machine",
+		"azurerm_kubernetes_cluster",
+		"azurerm_sql_database",
+		"azurerm_storage_account",
+		"azurerm_application_gateway",
+		"azurerm_firewall",
+	}
+
+	for _, criticalType := range criticalTypes {
+		if resourceType == criticalType {
+			return true
+		}
+	}
+	return false
+}
+
+// Helper function to check for high impact changes
+func hasHighImpactChanges(before, after map[string]interface{}, resourceType string) bool {
+	// Check for size/sku changes
+	if before["size"] != after["size"] || before["sku"] != after["sku"] {
+		return true
+	}
+
+	// Check for location changes (always high impact)
+	if before["location"] != after["location"] {
+		return true
+	}
+
+	// Resource-specific high impact checks
+	switch resourceType {
+	case "azurerm_virtual_machine":
+		return before["vm_size"] != after["vm_size"]
+	case "azurerm_kubernetes_cluster":
+		return before["node_count"] != after["node_count"] || before["vm_size"] != after["vm_size"]
+	}
+
+	return false
+}
+
+// Helper function to check for medium impact changes
+func hasMediumImpactChanges(before, after map[string]interface{}, resourceType string) bool {
+	// Check for tag changes
+	if !mapsEqual(getMapFromInterface(before["tags"]), getMapFromInterface(after["tags"])) {
+		return true
+	}
+
+	// Check for network-related changes
+	if before["subnet_id"] != after["subnet_id"] || before["public_ip"] != after["public_ip"] {
+		return true
+	}
+
+	return false
+}
+
+// Helper function to check if data contains sensitive information
+func containsSensitiveData(data map[string]interface{}) bool {
+	sensitiveKeys := []string{"password", "secret", "key", "token", "credential"}
+
+	for key := range data {
+		keyLower := strings.ToLower(key)
+		for _, sensitiveKey := range sensitiveKeys {
+			if strings.Contains(keyLower, sensitiveKey) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// Helper functions for map comparison
+func getMapFromInterface(i interface{}) map[string]interface{} {
+	if m, ok := i.(map[string]interface{}); ok {
+		return m
+	}
+	return make(map[string]interface{})
+}
+
+func mapsEqual(a, b map[string]interface{}) bool {
+	if len(a) != len(b) {
+		return false
+	}
+
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
+}
+
+// Helper functions for parsing Terraform variables
+func parseTerraformVariables(content string) map[string]string {
+	variables := make(map[string]string)
+	lines := strings.Split(content, "\n")
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Skip comments and empty lines
+		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "//") {
+			continue
+		}
+
+		// Parse variable assignment: var_name = "value"
+		if parts := strings.SplitN(line, "=", 2); len(parts) == 2 {
+			key := strings.TrimSpace(parts[0])
+			value := strings.TrimSpace(parts[1])
+
+			// Remove quotes from value
+			value = strings.Trim(value, `"'`)
+
+			variables[key] = value
+		}
+	}
+
+	return variables
 }
 
 func inferEnvironment(workspaceName string) string {
@@ -936,6 +1502,49 @@ type planChangesLoadedMsg struct {
 type workspaceInfoLoadedMsg struct {
 	workspaces []WorkspaceInfo
 	current    string
+}
+
+type workspaceSwitchedMsg struct {
+	workspace string
+	success   bool
+	message   string
+	output    string
+	error     error
+}
+
+type workspaceCreatedMsg struct {
+	workspace string
+	success   bool
+	message   string
+	output    string
+	error     error
+}
+
+type workspaceDeletedMsg struct {
+	workspace string
+	success   bool
+	message   string
+	output    string
+	error     error
+}
+
+// Variable management message types
+type variablesLoadedMsg struct {
+	variables map[string]string
+}
+
+type variableUpdatedMsg struct {
+	name    string
+	value   string
+	success bool
+	message string
+	error   error
+}
+
+// Output values message types
+type outputsLoadedMsg struct {
+	outputs map[string]interface{}
+	content string
 }
 
 // Message types
