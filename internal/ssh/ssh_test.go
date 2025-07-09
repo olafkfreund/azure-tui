@@ -10,15 +10,15 @@ import (
 
 func TestNewSSHManager(t *testing.T) {
 	manager := NewSSHManager()
-	
+
 	if manager == nil {
 		t.Fatal("NewSSHManager returned nil")
 	}
-	
+
 	if manager.connections == nil {
 		t.Error("SSH manager connections map is nil")
 	}
-	
+
 	if manager.timeout != 30*time.Second {
 		t.Errorf("Expected timeout 30s, got %v", manager.timeout)
 	}
@@ -26,12 +26,12 @@ func TestNewSSHManager(t *testing.T) {
 
 func TestDiscoverSSHKeys(t *testing.T) {
 	keys := discoverSSHKeys()
-	
+
 	// Test should pass even if no keys are found
 	if keys == nil {
 		t.Error("discoverSSHKeys returned nil")
 	}
-	
+
 	// If we're in a test environment, we might not have SSH keys
 	t.Logf("Found %d SSH keys", len(keys))
 	for i, key := range keys {
@@ -41,30 +41,30 @@ func TestDiscoverSSHKeys(t *testing.T) {
 
 func TestAddKeyPath(t *testing.T) {
 	manager := NewSSHManager()
-	
+
 	// Test adding a non-existent key path
 	err := manager.AddKeyPath("/nonexistent/key")
 	if err == nil {
 		t.Error("Expected error for non-existent key path")
 	}
-	
+
 	// Test adding a valid path (create temporary file)
 	tmpDir := t.TempDir()
 	tmpKeyPath := filepath.Join(tmpDir, "test_key")
-	
+
 	// Create a temporary file
 	file, err := os.Create(tmpKeyPath)
 	if err != nil {
 		t.Fatalf("Failed to create temporary key file: %v", err)
 	}
 	file.Close()
-	
+
 	// Test adding the valid key path
 	err = manager.AddKeyPath(tmpKeyPath)
 	if err != nil {
 		t.Errorf("Failed to add valid key path: %v", err)
 	}
-	
+
 	// Verify the key was added
 	found := false
 	for _, key := range manager.keyPaths {
@@ -76,7 +76,7 @@ func TestAddKeyPath(t *testing.T) {
 	if !found {
 		t.Error("Key path was not added to manager")
 	}
-	
+
 	// Test adding the same key path again (should not duplicate)
 	initialCount := len(manager.keyPaths)
 	err = manager.AddKeyPath(tmpKeyPath)
@@ -90,12 +90,12 @@ func TestAddKeyPath(t *testing.T) {
 
 func TestGetAvailableKeys(t *testing.T) {
 	manager := NewSSHManager()
-	
+
 	keys := manager.GetAvailableKeys()
 	if keys == nil {
 		t.Error("GetAvailableKeys returned nil")
 	}
-	
+
 	// Test that we get a copy, not the original slice
 	if len(keys) > 0 {
 		original := keys[0]
@@ -111,10 +111,10 @@ func TestGetAvailableKeys(t *testing.T) {
 
 func TestSetTimeout(t *testing.T) {
 	manager := NewSSHManager()
-	
+
 	newTimeout := 60 * time.Second
 	manager.SetTimeout(newTimeout)
-	
+
 	if manager.timeout != newTimeout {
 		t.Errorf("Expected timeout %v, got %v", newTimeout, manager.timeout)
 	}
@@ -128,11 +128,11 @@ func TestSSHConnection(t *testing.T) {
 		KeyPath:  "/test/key",
 		ConnTime: time.Now(),
 	}
-	
+
 	if conn.Host != "test.example.com" {
 		t.Errorf("Expected host 'test.example.com', got '%s'", conn.Host)
 	}
-	
+
 	if conn.User != "testuser" {
 		t.Errorf("Expected user 'testuser', got '%s'", conn.User)
 	}
@@ -140,7 +140,7 @@ func TestSSHConnection(t *testing.T) {
 
 func TestGetActiveConnections(t *testing.T) {
 	manager := NewSSHManager()
-	
+
 	// Test with no connections
 	active := manager.GetActiveConnections()
 	if active == nil {
@@ -153,7 +153,7 @@ func TestGetActiveConnections(t *testing.T) {
 
 func TestCloseConnection(t *testing.T) {
 	manager := NewSSHManager()
-	
+
 	// Test closing non-existent connection
 	err := manager.CloseConnection("nonexistent.com", "user")
 	if err != nil {
@@ -163,7 +163,7 @@ func TestCloseConnection(t *testing.T) {
 
 func TestCloseAllConnections(t *testing.T) {
 	manager := NewSSHManager()
-	
+
 	// Test with no connections
 	err := manager.CloseAllConnections()
 	if err != nil {
@@ -177,7 +177,7 @@ func TestSSHKeyDiscoveryPaths(t *testing.T) {
 	if err != nil {
 		t.Skip("Cannot get current user, skipping SSH key discovery test")
 	}
-	
+
 	sshDir := filepath.Join(currentUser.HomeDir, ".ssh")
 	expectedKeys := []string{
 		filepath.Join(sshDir, "id_rsa"),
@@ -186,9 +186,9 @@ func TestSSHKeyDiscoveryPaths(t *testing.T) {
 		filepath.Join(sshDir, "azure_key"),
 		filepath.Join(sshDir, "azure_rsa"),
 	}
-	
+
 	discoveredKeys := discoverSSHKeys()
-	
+
 	// Check that discovered keys are from expected paths
 	for _, discovered := range discoveredKeys {
 		found := false
@@ -202,7 +202,7 @@ func TestSSHKeyDiscoveryPaths(t *testing.T) {
 			t.Logf("Discovered unexpected key path: %s", discovered)
 		}
 	}
-	
+
 	// Log what we found for debugging
 	t.Logf("SSH directory: %s", sshDir)
 	t.Logf("Expected key paths: %v", expectedKeys)

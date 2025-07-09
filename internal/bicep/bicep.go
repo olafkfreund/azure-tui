@@ -14,26 +14,26 @@ import (
 
 // BicepTemplate represents a Bicep template structure
 type BicepTemplate struct {
-	FilePath        string                 `json:"filePath"`
-	Content         string                 `json:"content"`
-	Parameters      map[string]Parameter   `json:"parameters"`
-	Variables       map[string]interface{} `json:"variables"`
-	Resources       []Resource             `json:"resources"`
-	Outputs         map[string]Output      `json:"outputs"`
-	Metadata        Metadata               `json:"metadata"`
+	FilePath   string                 `json:"filePath"`
+	Content    string                 `json:"content"`
+	Parameters map[string]Parameter   `json:"parameters"`
+	Variables  map[string]interface{} `json:"variables"`
+	Resources  []Resource             `json:"resources"`
+	Outputs    map[string]Output      `json:"outputs"`
+	Metadata   Metadata               `json:"metadata"`
 }
 
 // Parameter represents a Bicep parameter
 type Parameter struct {
-	Type         string        `json:"type"`
-	DefaultValue interface{}   `json:"defaultValue,omitempty"`
+	Type          string        `json:"type"`
+	DefaultValue  interface{}   `json:"defaultValue,omitempty"`
 	AllowedValues []interface{} `json:"allowedValues,omitempty"`
-	MinValue     *int          `json:"minValue,omitempty"`
-	MaxValue     *int          `json:"maxValue,omitempty"`
-	MinLength    *int          `json:"minLength,omitempty"`
-	MaxLength    *int          `json:"maxLength,omitempty"`
-	Description  string        `json:"description,omitempty"`
-	Metadata     interface{}   `json:"metadata,omitempty"`
+	MinValue      *int          `json:"minValue,omitempty"`
+	MaxValue      *int          `json:"maxValue,omitempty"`
+	MinLength     *int          `json:"minLength,omitempty"`
+	MaxLength     *int          `json:"maxLength,omitempty"`
+	Description   string        `json:"description,omitempty"`
+	Metadata      interface{}   `json:"metadata,omitempty"`
 }
 
 // Resource represents a Bicep resource
@@ -68,9 +68,9 @@ type Metadata struct {
 
 // BicepManager manages Bicep operations
 type BicepManager struct {
-	timeout     time.Duration
-	bicepPath   string
-	tempDir     string
+	timeout   time.Duration
+	bicepPath string
+	tempDir   string
 }
 
 // DeploymentResult represents the result of a Bicep deployment
@@ -85,8 +85,8 @@ type DeploymentResult struct {
 
 // ValidationResult represents Bicep validation results
 type ValidationResult struct {
-	Valid   bool     `json:"valid"`
-	Errors  []string `json:"errors"`
+	Valid    bool     `json:"valid"`
+	Errors   []string `json:"errors"`
 	Warnings []string `json:"warnings"`
 }
 
@@ -108,13 +108,13 @@ func findBicepExecutable() string {
 		"/usr/bin/bicep",
 		"/opt/bicep/bicep",
 	}
-	
+
 	for _, path := range paths {
 		if _, err := exec.LookPath(path); err == nil {
 			return path
 		}
 	}
-	
+
 	return "az bicep" // Fallback to Azure CLI bicep
 }
 
@@ -129,7 +129,7 @@ func (bm *BicepManager) ParseBicepFile(filePath string) (*BicepTemplate, error) 
 	if err != nil {
 		return nil, fmt.Errorf("failed to read Bicep file: %v", err)
 	}
-	
+
 	template := &BicepTemplate{
 		FilePath:   filePath,
 		Content:    string(content),
@@ -138,48 +138,48 @@ func (bm *BicepManager) ParseBicepFile(filePath string) (*BicepTemplate, error) 
 		Resources:  []Resource{},
 		Outputs:    make(map[string]Output),
 	}
-	
+
 	// Parse the Bicep content
 	if err := bm.parseBicepContent(template); err != nil {
 		return nil, fmt.Errorf("failed to parse Bicep content: %v", err)
 	}
-	
+
 	return template, nil
 }
 
 // parseBicepContent parses the Bicep file content to extract components
 func (bm *BicepManager) parseBicepContent(template *BicepTemplate) error {
 	lines := strings.Split(template.Content, "\n")
-	
+
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		
+
 		// Skip comments and empty lines
 		if line == "" || strings.HasPrefix(line, "//") {
 			continue
 		}
-		
+
 		// Parse parameters
 		if strings.HasPrefix(line, "param ") {
 			if err := bm.parseParameter(line, template); err != nil {
 				return err
 			}
 		}
-		
+
 		// Parse variables
 		if strings.HasPrefix(line, "var ") {
 			if err := bm.parseVariable(line, template); err != nil {
 				return err
 			}
 		}
-		
+
 		// Parse resources
 		if strings.HasPrefix(line, "resource ") {
 			if err := bm.parseResource(line, template); err != nil {
 				return err
 			}
 		}
-		
+
 		// Parse outputs
 		if strings.HasPrefix(line, "output ") {
 			if err := bm.parseOutput(line, template); err != nil {
@@ -187,7 +187,7 @@ func (bm *BicepManager) parseBicepContent(template *BicepTemplate) error {
 			}
 		}
 	}
-	
+
 	return nil
 }
 
@@ -197,23 +197,23 @@ func (bm *BicepManager) parseParameter(line string, template *BicepTemplate) err
 	// Example: param location string = resourceGroup().location
 	re := regexp.MustCompile(`param\s+(\w+)\s+(\w+)\s*(?:=\s*(.+))?`)
 	matches := re.FindStringSubmatch(line)
-	
+
 	if len(matches) < 3 {
 		return nil // Skip malformed parameters
 	}
-	
+
 	paramName := matches[1]
 	paramType := matches[2]
-	
+
 	param := Parameter{
 		Type: paramType,
 	}
-	
+
 	if len(matches) > 3 && matches[3] != "" {
 		defaultValue := strings.Trim(matches[3], "'\"")
 		param.DefaultValue = defaultValue
 	}
-	
+
 	template.Parameters[paramName] = param
 	return nil
 }
@@ -223,14 +223,14 @@ func (bm *BicepManager) parseVariable(line string, template *BicepTemplate) erro
 	// Example: var uniqueStorageName = '${storagePrefix}${uniqueString(resourceGroup().id)}'
 	re := regexp.MustCompile(`var\s+(\w+)\s*=\s*(.+)`)
 	matches := re.FindStringSubmatch(line)
-	
+
 	if len(matches) < 3 {
 		return nil
 	}
-	
+
 	varName := matches[1]
 	varValue := strings.Trim(matches[2], "'\"")
-	
+
 	template.Variables[varName] = varValue
 	return nil
 }
@@ -240,15 +240,15 @@ func (bm *BicepManager) parseResource(line string, template *BicepTemplate) erro
 	// Example: resource storageAccount 'Microsoft.Storage/storageAccounts@2021-04-01' = {
 	re := regexp.MustCompile(`resource\s+(\w+)\s+'([^@]+)@([^']+)'`)
 	matches := re.FindStringSubmatch(line)
-	
+
 	if len(matches) < 4 {
 		return nil
 	}
-	
+
 	resourceName := matches[1]
 	resourceType := matches[2]
 	apiVersion := matches[3]
-	
+
 	resource := Resource{
 		Type:       resourceType,
 		APIVersion: apiVersion,
@@ -256,7 +256,7 @@ func (bm *BicepManager) parseResource(line string, template *BicepTemplate) erro
 		Properties: make(map[string]interface{}),
 		Tags:       make(map[string]string),
 	}
-	
+
 	template.Resources = append(template.Resources, resource)
 	return nil
 }
@@ -266,20 +266,20 @@ func (bm *BicepManager) parseOutput(line string, template *BicepTemplate) error 
 	// Example: output storageAccountId string = storageAccount.id
 	re := regexp.MustCompile(`output\s+(\w+)\s+(\w+)\s*=\s*(.+)`)
 	matches := re.FindStringSubmatch(line)
-	
+
 	if len(matches) < 4 {
 		return nil
 	}
-	
+
 	outputName := matches[1]
 	outputType := matches[2]
 	outputValue := strings.Trim(matches[3], "'\"")
-	
+
 	output := Output{
 		Type:  outputType,
 		Value: outputValue,
 	}
-	
+
 	template.Outputs[outputName] = output
 	return nil
 }
@@ -289,21 +289,21 @@ func (bm *BicepManager) CompileBicep(ctx context.Context, bicepFilePath string) 
 	if err := bm.ensureTempDir(); err != nil {
 		return "", err
 	}
-	
+
 	outputPath := filepath.Join(bm.tempDir, "compiled.json")
-	
+
 	var cmd *exec.Cmd
 	if strings.Contains(bm.bicepPath, "az bicep") {
 		cmd = exec.CommandContext(ctx, "az", "bicep", "build", "--file", bicepFilePath, "--outfile", outputPath)
 	} else {
 		cmd = exec.CommandContext(ctx, bm.bicepPath, "build", bicepFilePath, "--outfile", outputPath)
 	}
-	
+
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("bicep compilation failed: %v, output: %s", err, string(output))
 	}
-	
+
 	return outputPath, nil
 }
 
@@ -315,30 +315,30 @@ func (bm *BicepManager) ValidateBicep(ctx context.Context, bicepFilePath string)
 	} else {
 		cmd = exec.CommandContext(ctx, bm.bicepPath, "build", bicepFilePath, "--stdout")
 	}
-	
+
 	output, err := cmd.CombinedOutput()
 	result := &ValidationResult{
 		Valid:    err == nil,
 		Errors:   []string{},
 		Warnings: []string{},
 	}
-	
+
 	if err != nil {
 		result.Errors = append(result.Errors, string(output))
 	}
-	
+
 	return result, nil
 }
 
 // DeployBicep deploys a Bicep template to Azure
 func (bm *BicepManager) DeployBicep(ctx context.Context, resourceGroup, deploymentName, bicepFilePath string, parameters map[string]string) (*DeploymentResult, error) {
 	startTime := time.Now()
-	
+
 	result := &DeploymentResult{
 		DeploymentID: deploymentName,
 		Output:       make(map[string]string),
 	}
-	
+
 	// Build the deployment command
 	args := []string{
 		"deployment", "group", "create",
@@ -346,7 +346,7 @@ func (bm *BicepManager) DeployBicep(ctx context.Context, resourceGroup, deployme
 		"--name", deploymentName,
 		"--template-file", bicepFilePath,
 	}
-	
+
 	// Add parameters
 	if len(parameters) > 0 {
 		paramStr := ""
@@ -358,22 +358,22 @@ func (bm *BicepManager) DeployBicep(ctx context.Context, resourceGroup, deployme
 		}
 		args = append(args, "--parameters", paramStr)
 	}
-	
+
 	cmd := exec.CommandContext(ctx, "az", args...)
 	output, err := cmd.CombinedOutput()
-	
+
 	result.Duration = time.Since(startTime)
-	
+
 	if err != nil {
 		result.Success = false
 		result.Error = string(output)
 		result.Message = fmt.Sprintf("Deployment failed: %v", err)
 		return result, err
 	}
-	
+
 	result.Success = true
 	result.Message = "Deployment completed successfully"
-	
+
 	// Parse deployment output if it's JSON
 	var deploymentOutput map[string]interface{}
 	if err := json.Unmarshal(output, &deploymentOutput); err == nil {
@@ -387,7 +387,7 @@ func (bm *BicepManager) DeployBicep(ctx context.Context, resourceGroup, deployme
 			}
 		}
 	}
-	
+
 	return result, nil
 }
 
@@ -399,12 +399,12 @@ func (bm *BicepManager) GenerateBicepFromResource(ctx context.Context, resourceI
 	if err != nil {
 		return nil, fmt.Errorf("failed to get resource: %v", err)
 	}
-	
+
 	var resourceData map[string]interface{}
 	if err := json.Unmarshal(output, &resourceData); err != nil {
 		return nil, fmt.Errorf("failed to parse resource data: %v", err)
 	}
-	
+
 	// Convert ARM resource to Bicep
 	template := &BicepTemplate{
 		Parameters: make(map[string]Parameter),
@@ -417,7 +417,7 @@ func (bm *BicepManager) GenerateBicepFromResource(ctx context.Context, resourceI
 			Created:     time.Now(),
 		},
 	}
-	
+
 	// Extract resource information
 	if resourceType, ok := resourceData["type"].(string); ok {
 		if apiVersion, ok := resourceData["apiVersion"].(string); ok {
@@ -429,17 +429,17 @@ func (bm *BicepManager) GenerateBicepFromResource(ctx context.Context, resourceI
 					Properties: make(map[string]interface{}),
 					Tags:       make(map[string]string),
 				}
-				
+
 				// Extract location
 				if location, ok := resourceData["location"].(string); ok {
 					resource.Location = location
 				}
-				
+
 				// Extract properties
 				if properties, ok := resourceData["properties"].(map[string]interface{}); ok {
 					resource.Properties = properties
 				}
-				
+
 				// Extract tags
 				if tags, ok := resourceData["tags"].(map[string]interface{}); ok {
 					for key, value := range tags {
@@ -448,29 +448,29 @@ func (bm *BicepManager) GenerateBicepFromResource(ctx context.Context, resourceI
 						}
 					}
 				}
-				
+
 				template.Resources = append(template.Resources, resource)
 			}
 		}
 	}
-	
+
 	// Generate Bicep content
 	template.Content = bm.generateBicepContent(template)
-	
+
 	return template, nil
 }
 
 // generateBicepContent generates Bicep content from template structure
 func (bm *BicepManager) generateBicepContent(template *BicepTemplate) string {
 	var content strings.Builder
-	
+
 	// Add metadata
 	if template.Metadata.Description != "" {
 		content.WriteString(fmt.Sprintf("// %s\n", template.Metadata.Description))
 		content.WriteString(fmt.Sprintf("// Generated by: %s\n", template.Metadata.Author))
 		content.WriteString(fmt.Sprintf("// Created: %s\n\n", template.Metadata.Created.Format("2006-01-02 15:04:05")))
 	}
-	
+
 	// Add parameters
 	for name, param := range template.Parameters {
 		line := fmt.Sprintf("param %s %s", name, param.Type)
@@ -483,11 +483,11 @@ func (bm *BicepManager) generateBicepContent(template *BicepTemplate) string {
 		}
 		content.WriteString(line + "\n")
 	}
-	
+
 	if len(template.Parameters) > 0 {
 		content.WriteString("\n")
 	}
-	
+
 	// Add variables
 	for name, value := range template.Variables {
 		if strValue, ok := value.(string); ok {
@@ -496,20 +496,20 @@ func (bm *BicepManager) generateBicepContent(template *BicepTemplate) string {
 			content.WriteString(fmt.Sprintf("var %s = %v\n", name, value))
 		}
 	}
-	
+
 	if len(template.Variables) > 0 {
 		content.WriteString("\n")
 	}
-	
+
 	// Add resources
 	for _, resource := range template.Resources {
 		content.WriteString(fmt.Sprintf("resource %s '%s@%s' = {\n", resource.Name, resource.Type, resource.APIVersion))
 		content.WriteString(fmt.Sprintf("  name: '%s'\n", resource.Name))
-		
+
 		if resource.Location != "" {
 			content.WriteString(fmt.Sprintf("  location: '%s'\n", resource.Location))
 		}
-		
+
 		if len(resource.Properties) > 0 {
 			content.WriteString("  properties: {\n")
 			for key, value := range resource.Properties {
@@ -521,7 +521,7 @@ func (bm *BicepManager) generateBicepContent(template *BicepTemplate) string {
 			}
 			content.WriteString("  }\n")
 		}
-		
+
 		if len(resource.Tags) > 0 {
 			content.WriteString("  tags: {\n")
 			for key, value := range resource.Tags {
@@ -529,10 +529,10 @@ func (bm *BicepManager) generateBicepContent(template *BicepTemplate) string {
 			}
 			content.WriteString("  }\n")
 		}
-		
+
 		content.WriteString("}\n\n")
 	}
-	
+
 	// Add outputs
 	for name, output := range template.Outputs {
 		if strValue, ok := output.Value.(string); ok {
@@ -541,7 +541,7 @@ func (bm *BicepManager) generateBicepContent(template *BicepTemplate) string {
 			content.WriteString(fmt.Sprintf("output %s %s = %v\n", name, output.Type, output.Value))
 		}
 	}
-	
+
 	return content.String()
 }
 
@@ -550,26 +550,26 @@ func (bm *BicepManager) SaveBicepTemplate(template *BicepTemplate, filePath stri
 	if err := os.MkdirAll(filepath.Dir(filePath), 0755); err != nil {
 		return fmt.Errorf("failed to create directory: %v", err)
 	}
-	
+
 	return os.WriteFile(filePath, []byte(template.Content), 0644)
 }
 
 // ListBicepFiles finds all Bicep files in a directory
 func (bm *BicepManager) ListBicepFiles(directory string) ([]string, error) {
 	var bicepFiles []string
-	
+
 	err := filepath.Walk(directory, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
 		}
-		
+
 		if !info.IsDir() && strings.HasSuffix(path, ".bicep") {
 			bicepFiles = append(bicepFiles, path)
 		}
-		
+
 		return nil
 	})
-	
+
 	return bicepFiles, err
 }
 
@@ -581,12 +581,12 @@ func (bm *BicepManager) GetBicepVersion(ctx context.Context) (string, error) {
 	} else {
 		cmd = exec.CommandContext(ctx, bm.bicepPath, "--version")
 	}
-	
+
 	output, err := cmd.Output()
 	if err != nil {
 		return "", fmt.Errorf("failed to get Bicep version: %v", err)
 	}
-	
+
 	return strings.TrimSpace(string(output)), nil
 }
 
@@ -614,20 +614,20 @@ func (bm *BicepManager) GenerateStorageAccountTemplate(name, location, sku strin
 	template := &BicepTemplate{
 		Parameters: map[string]Parameter{
 			"storageAccountName": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: name,
-				Description: "Name of the storage account",
+				Description:  "Name of the storage account",
 			},
 			"location": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: location,
-				Description: "Location for the storage account",
+				Description:  "Location for the storage account",
 			},
 			"skuName": {
-				Type:        "string",
-				DefaultValue: sku,
+				Type:          "string",
+				DefaultValue:  sku,
 				AllowedValues: []interface{}{"Standard_LRS", "Standard_GRS", "Standard_RAGRS", "Premium_LRS"},
-				Description: "SKU for the storage account",
+				Description:   "SKU for the storage account",
 			},
 		},
 		Variables: map[string]interface{}{},
@@ -639,8 +639,8 @@ func (bm *BicepManager) GenerateStorageAccountTemplate(name, location, sku strin
 				Location:   "location",
 				Properties: map[string]interface{}{
 					"supportsHttpsTrafficOnly": true,
-					"allowBlobPublicAccess":     false,
-					"minimumTlsVersion":         "TLS1_2",
+					"allowBlobPublicAccess":    false,
+					"minimumTlsVersion":        "TLS1_2",
 				},
 				Tags: map[string]string{
 					"Environment": "Development",
@@ -664,7 +664,7 @@ func (bm *BicepManager) GenerateStorageAccountTemplate(name, location, sku strin
 			Created:     time.Now(),
 		},
 	}
-	
+
 	template.Content = bm.generateBicepContent(template)
 	return template
 }
@@ -674,24 +674,24 @@ func (bm *BicepManager) GenerateVirtualMachineTemplate(vmName, location, vmSize,
 	template := &BicepTemplate{
 		Parameters: map[string]Parameter{
 			"vmName": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: vmName,
-				Description: "Name of the virtual machine",
+				Description:  "Name of the virtual machine",
 			},
 			"location": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: location,
-				Description: "Location for the virtual machine",
+				Description:  "Location for the virtual machine",
 			},
 			"vmSize": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: vmSize,
-				Description: "Size of the virtual machine",
+				Description:  "Size of the virtual machine",
 			},
 			"adminUsername": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: adminUsername,
-				Description: "Admin username for the virtual machine",
+				Description:  "Admin username for the virtual machine",
 			},
 			"sshPublicKey": {
 				Type:        "string",
@@ -699,11 +699,11 @@ func (bm *BicepManager) GenerateVirtualMachineTemplate(vmName, location, vmSize,
 			},
 		},
 		Variables: map[string]interface{}{
-			"vnetName":        fmt.Sprintf("%s-vnet", vmName),
-			"subnetName":      "default",
-			"nicName":         fmt.Sprintf("%s-nic", vmName),
-			"publicIPName":    fmt.Sprintf("%s-pip", vmName),
-			"nsgName":         fmt.Sprintf("%s-nsg", vmName),
+			"vnetName":     fmt.Sprintf("%s-vnet", vmName),
+			"subnetName":   "default",
+			"nicName":      fmt.Sprintf("%s-nic", vmName),
+			"publicIPName": fmt.Sprintf("%s-pip", vmName),
+			"nsgName":      fmt.Sprintf("%s-nsg", vmName),
 		},
 		Resources: []Resource{
 			{
@@ -848,7 +848,7 @@ func (bm *BicepManager) GenerateVirtualMachineTemplate(vmName, location, vmSize,
 			Created:     time.Now(),
 		},
 	}
-	
+
 	template.Content = bm.generateBicepContent(template)
 	return template
 }
@@ -858,26 +858,26 @@ func (bm *BicepManager) GenerateAKSTemplate(clusterName, location string, nodeCo
 	template := &BicepTemplate{
 		Parameters: map[string]Parameter{
 			"clusterName": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: clusterName,
-				Description: "Name of the AKS cluster",
+				Description:  "Name of the AKS cluster",
 			},
 			"location": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: location,
-				Description: "Location for the AKS cluster",
+				Description:  "Location for the AKS cluster",
 			},
 			"nodeCount": {
-				Type:        "int",
+				Type:         "int",
 				DefaultValue: nodeCount,
-				MinValue:    &[]int{1}[0],
-				MaxValue:    &[]int{100}[0],
-				Description: "Number of nodes in the cluster",
+				MinValue:     &[]int{1}[0],
+				MaxValue:     &[]int{100}[0],
+				Description:  "Number of nodes in the cluster",
 			},
 			"vmSize": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: "Standard_DS2_v2",
-				Description: "Size of the VMs for the node pool",
+				Description:  "Size of the VMs for the node pool",
 			},
 		},
 		Variables: map[string]interface{}{},
@@ -928,7 +928,7 @@ func (bm *BicepManager) GenerateAKSTemplate(clusterName, location string, nodeCo
 			Created:     time.Now(),
 		},
 	}
-	
+
 	template.Content = bm.generateBicepContent(template)
 	return template
 }
@@ -938,19 +938,19 @@ func (bm *BicepManager) GenerateKeyVaultTemplate(vaultName, location, tenantId s
 	template := &BicepTemplate{
 		Parameters: map[string]Parameter{
 			"keyVaultName": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: vaultName,
-				Description: "Name of the Key Vault",
+				Description:  "Name of the Key Vault",
 			},
 			"location": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: location,
-				Description: "Location for the Key Vault",
+				Description:  "Location for the Key Vault",
 			},
 			"tenantId": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: tenantId,
-				Description: "Tenant ID for the Key Vault",
+				Description:  "Tenant ID for the Key Vault",
 			},
 			"objectId": {
 				Type:        "string",
@@ -1009,7 +1009,7 @@ func (bm *BicepManager) GenerateKeyVaultTemplate(vaultName, location, tenantId s
 			Created:     time.Now(),
 		},
 	}
-	
+
 	template.Content = bm.generateBicepContent(template)
 	return template
 }
@@ -1019,14 +1019,14 @@ func (bm *BicepManager) GenerateResourceGroupTemplate(rgName, location string) *
 	template := &BicepTemplate{
 		Parameters: map[string]Parameter{
 			"resourceGroupName": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: rgName,
-				Description: "Name of the resource group",
+				Description:  "Name of the resource group",
 			},
 			"location": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: location,
-				Description: "Location for the resource group",
+				Description:  "Location for the resource group",
 			},
 		},
 		Variables: map[string]interface{}{},
@@ -1055,7 +1055,7 @@ func (bm *BicepManager) GenerateResourceGroupTemplate(rgName, location string) *
 			Created:     time.Now(),
 		},
 	}
-	
+
 	template.Content = bm.generateBicepContent(template)
 	return template
 }
@@ -1065,19 +1065,19 @@ func (bm *BicepManager) GenerateCompleteInfrastructureTemplate(projectName, loca
 	template := &BicepTemplate{
 		Parameters: map[string]Parameter{
 			"projectName": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: projectName,
-				Description: "Name of the project (used as prefix)",
+				Description:  "Name of the project (used as prefix)",
 			},
 			"location": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: location,
-				Description: "Location for all resources",
+				Description:  "Location for all resources",
 			},
 			"adminUsername": {
-				Type:        "string",
+				Type:         "string",
 				DefaultValue: "azureuser",
-				Description: "Admin username for VMs",
+				Description:  "Admin username for VMs",
 			},
 			"sshPublicKey": {
 				Type:        "string",
@@ -1098,8 +1098,8 @@ func (bm *BicepManager) GenerateCompleteInfrastructureTemplate(projectName, loca
 				Location:   "location",
 				Properties: map[string]interface{}{
 					"supportsHttpsTrafficOnly": true,
-					"allowBlobPublicAccess":     false,
-					"minimumTlsVersion":         "TLS1_2",
+					"allowBlobPublicAccess":    false,
+					"minimumTlsVersion":        "TLS1_2",
 				},
 			},
 			{
@@ -1165,7 +1165,7 @@ func (bm *BicepManager) GenerateCompleteInfrastructureTemplate(projectName, loca
 			Created:     time.Now(),
 		},
 	}
-	
+
 	template.Content = bm.generateBicepContent(template)
 	return template
 }

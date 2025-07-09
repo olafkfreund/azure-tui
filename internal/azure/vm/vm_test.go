@@ -11,15 +11,15 @@ func TestNewVMManager(t *testing.T) {
 	// Since we can't create real Azure credentials in tests, we'll test with nil
 	// In a real scenario, this would be created with proper credentials
 	manager := NewVMManager(nil, "test-subscription-id")
-	
+
 	if manager == nil {
 		t.Fatal("NewVMManager returned nil")
 	}
-	
+
 	if manager.subscriptionID != "test-subscription-id" {
 		t.Errorf("Expected subscription ID 'test-subscription-id', got '%s'", manager.subscriptionID)
 	}
-	
+
 	if manager.timeout != 30*time.Second {
 		t.Errorf("Expected timeout 30s, got %v", manager.timeout)
 	}
@@ -41,23 +41,23 @@ func TestVMInfo(t *testing.T) {
 		AdminUsername:     "azureuser",
 		SSHPublicKeys:     []string{"ssh-rsa AAAAB3... test@test.com"},
 	}
-	
+
 	if vmInfo.Name != "test-vm" {
 		t.Errorf("Expected VM name 'test-vm', got '%s'", vmInfo.Name)
 	}
-	
+
 	if vmInfo.OSType != "Linux" {
 		t.Errorf("Expected OS type 'Linux', got '%s'", vmInfo.OSType)
 	}
-	
+
 	if vmInfo.PowerState != "running" {
 		t.Errorf("Expected power state 'running', got '%s'", vmInfo.PowerState)
 	}
-	
+
 	if len(vmInfo.NetworkInterfaces) != 1 {
 		t.Errorf("Expected 1 network interface, got %d", len(vmInfo.NetworkInterfaces))
 	}
-	
+
 	if len(vmInfo.SSHPublicKeys) != 1 {
 		t.Errorf("Expected 1 SSH public key, got %d", len(vmInfo.SSHPublicKeys))
 	}
@@ -65,10 +65,10 @@ func TestVMInfo(t *testing.T) {
 
 func TestSetTimeout(t *testing.T) {
 	manager := NewVMManager(nil, "test-subscription-id")
-	
+
 	newTimeout := 60 * time.Second
 	manager.SetTimeout(newTimeout)
-	
+
 	if manager.timeout != newTimeout {
 		t.Errorf("Expected timeout %v, got %v", newTimeout, manager.timeout)
 	}
@@ -103,30 +103,30 @@ func TestVMResourceIDParsing(t *testing.T) {
 			shouldFail: true,
 		},
 	}
-	
+
 	for i, tc := range testCases {
 		t.Run(fmt.Sprintf("TestCase%d", i+1), func(t *testing.T) {
 			parts := strings.Split(tc.resourceID, "/")
-			
+
 			if tc.shouldFail {
 				if len(parts) >= 9 {
 					t.Errorf("Expected parsing to fail for invalid resource ID: %s", tc.resourceID)
 				}
 				return
 			}
-			
+
 			if len(parts) < 9 {
 				t.Errorf("Expected valid resource ID, but parsing failed: %s", tc.resourceID)
 				return
 			}
-			
+
 			resourceGroup := parts[4]
 			resourceName := parts[8]
-			
+
 			if resourceGroup != tc.expectedRG {
 				t.Errorf("Expected resource group '%s', got '%s'", tc.expectedRG, resourceGroup)
 			}
-			
+
 			if resourceName != tc.expectedResource {
 				t.Errorf("Expected resource name '%s', got '%s'", tc.expectedResource, resourceName)
 			}
@@ -172,7 +172,7 @@ func TestDefaultUsernameLogic(t *testing.T) {
 			expectedUsername: "customuser",
 		},
 	}
-	
+
 	for i, tc := range testCases {
 		t.Run(fmt.Sprintf("UsernameTest%d", i+1), func(t *testing.T) {
 			username := tc.providedUsername
@@ -185,7 +185,7 @@ func TestDefaultUsernameLogic(t *testing.T) {
 					username = "azureuser"
 				}
 			}
-			
+
 			if username != tc.expectedUsername {
 				t.Errorf("Expected username '%s', got '%s' for OS type '%s'", tc.expectedUsername, username, tc.osType)
 			}
@@ -196,12 +196,12 @@ func TestDefaultUsernameLogic(t *testing.T) {
 // Test VM connection priority logic (public IP > private IP > FQDN)
 func TestVMConnectionPriority(t *testing.T) {
 	testCases := []struct {
-		name               string
-		publicIP           string
-		privateIP          string
-		fqdn               string
-		expectedHost       string
-		shouldHaveHost     bool
+		name           string
+		publicIP       string
+		privateIP      string
+		fqdn           string
+		expectedHost   string
+		shouldHaveHost bool
 	}{
 		{
 			name:           "Public IP available",
@@ -244,7 +244,7 @@ func TestVMConnectionPriority(t *testing.T) {
 			shouldHaveHost: true,
 		},
 	}
-	
+
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			// Simulate connection host selection logic
@@ -255,7 +255,7 @@ func TestVMConnectionPriority(t *testing.T) {
 			if host == "" && tc.fqdn != "" {
 				host = tc.fqdn
 			}
-			
+
 			if tc.shouldHaveHost {
 				if host == "" {
 					t.Error("Expected to have a host, but got empty string")
@@ -270,4 +270,3 @@ func TestVMConnectionPriority(t *testing.T) {
 		})
 	}
 }
-

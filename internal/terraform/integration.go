@@ -7,12 +7,12 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/bubbles/list"
 	"github.com/charmbracelet/bubbles/textinput"
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/olafkfreund/azure-tui/internal/config"
 	"github.com/olafkfreund/azure-tui/internal/azure/tfbicep"
+	"github.com/olafkfreund/azure-tui/internal/config"
 )
 
 // Integration functions for adding Terraform support to the main TUI
@@ -122,12 +122,12 @@ type quickApplyMsg struct{}
 
 // QuickTemplateCreator handles quick template creation
 type QuickTemplateCreator struct {
-	templates     list.Model
-	nameInput     textinput.Model
+	templates        list.Model
+	nameInput        textinput.Model
 	selectedTemplate string
-	step          int // 0: select template, 1: enter name, 2: create
-	status        string
-	error         string
+	step             int // 0: select template, 1: enter name, 2: create
+	status           string
+	error            string
 }
 
 // NewQuickTemplateCreator creates a new quick template creator
@@ -261,7 +261,7 @@ func (qtc *QuickTemplateCreator) View() string {
 			lipgloss.Left,
 			lipgloss.NewStyle().Bold(true).Render("🚀 Quick Template Creation"),
 			"",
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Render("✓ " + qtc.status),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Render("✓ "+qtc.status),
 			"",
 			"q: Quit",
 		)
@@ -273,7 +273,7 @@ func (qtc *QuickTemplateCreator) View() string {
 			lipgloss.Left,
 			lipgloss.NewStyle().Bold(true).Render("🚀 Quick Template Creation"),
 			"",
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Render("✗ Error: " + qtc.error),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Render("✗ Error: "+qtc.error),
 			"",
 			"q: Quit",
 		)
@@ -539,7 +539,7 @@ func (qdm *QuickDeployManager) View() string {
 			lipgloss.Left,
 			lipgloss.NewStyle().Bold(true).Render("⚡ Quick Deploy"),
 			"",
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Render("✓ " + qdm.status),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#50FA7B")).Render("✓ "+qdm.status),
 			"",
 			"q: Quit",
 		)
@@ -551,7 +551,7 @@ func (qdm *QuickDeployManager) View() string {
 			lipgloss.Left,
 			lipgloss.NewStyle().Bold(true).Render("⚡ Quick Deploy"),
 			"",
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Render("✗ Error: " + qdm.error),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Render("✗ Error: "+qdm.error),
 			"",
 			"q: Quit",
 		)
@@ -695,7 +695,7 @@ func (qdm *QuickDeployManager) deployResource() tea.Cmd {
 	return func() tea.Msg {
 		resourceType := qdm.resourceTypes.SelectedItem().(resourceTypeItem).resourceType
 		cfg := config.GetTerraformConfig()
-		
+
 		// Create temporary workspace for deployment
 		workspaceName := fmt.Sprintf("quick-deploy-%s-%d", resourceType, time.Now().Unix())
 		workspacePath := filepath.Join(cfg.WorkspacePath, workspaceName)
@@ -733,7 +733,7 @@ func (qdm *QuickDeployManager) deployResource() tea.Cmd {
 
 		// Initialize and apply
 		manager := tfbicep.NewTerraformManager(workspacePath)
-		
+
 		// Init
 		if _, err := manager.Init(); err != nil {
 			return errorMsg{fmt.Errorf("terraform init failed: %v", err)}
@@ -1162,7 +1162,7 @@ func (sv *StateViewerTUI) View() string {
 			lipgloss.Left,
 			lipgloss.NewStyle().Bold(true).Render("📊 Terraform State Viewer"),
 			"",
-			lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Render("✗ Error: " + sv.error),
+			lipgloss.NewStyle().Foreground(lipgloss.Color("#FF5555")).Render("✗ Error: "+sv.error),
 			"",
 			"q: Quit",
 		)
@@ -1197,7 +1197,7 @@ func (sv *StateViewerTUI) loadWorkspaces() tea.Cmd {
 		var items []list.Item
 		for _, workspace := range workspaces {
 			workspacePath := filepath.Join(cfg.WorkspacePath, workspace)
-			
+
 			description := "Terraform workspace"
 			// Try to get resource count
 			manager := tfbicep.NewTerraformManager(workspacePath)

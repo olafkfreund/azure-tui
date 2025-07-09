@@ -1299,26 +1299,26 @@ func GetVMSSHConnectionInfo(vmName, resourceGroup string) ActionResult {
 	}
 
 	connectionInfo := fmt.Sprintf("SSH Connection Guide for VM '%s':\n\n", vmName)
-	
+
 	// Connection options
 	if vmInfo.PublicIPAddress != "" {
 		connectionInfo += fmt.Sprintf("Option 1 - Direct SSH (Public IP):\n")
 		connectionInfo += fmt.Sprintf("  ssh %s@%s\n\n", vmInfo.AdminUsername, vmInfo.PublicIPAddress)
 	}
-	
+
 	if vmInfo.FQDN != "" {
 		connectionInfo += fmt.Sprintf("Option 2 - SSH via FQDN:\n")
 		connectionInfo += fmt.Sprintf("  ssh %s@%s\n\n", vmInfo.AdminUsername, vmInfo.FQDN)
 	}
-	
+
 	if vmInfo.PrivateIPAddress != "" {
 		connectionInfo += fmt.Sprintf("Option 3 - SSH via Private IP (requires VPN/Bastion):\n")
 		connectionInfo += fmt.Sprintf("  ssh %s@%s\n\n", vmInfo.AdminUsername, vmInfo.PrivateIPAddress)
 	}
-	
+
 	connectionInfo += fmt.Sprintf("Azure Bastion Option:\n")
 	connectionInfo += fmt.Sprintf("  az network bastion ssh --resource-group %s --name <bastion-name> --target-resource-id <vm-resource-id> --auth-type ssh-key --username %s\n\n", resourceGroup, vmInfo.AdminUsername)
-	
+
 	// SSH key information
 	availableKeys := sshManager.GetAvailableKeys()
 	if len(availableKeys) > 0 {

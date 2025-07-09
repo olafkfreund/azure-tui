@@ -57,12 +57,12 @@ func NewSSHManagerWithVM(cred *azidentity.DefaultAzureCredential, subscriptionID
 // discoverSSHKeys finds SSH keys in common locations
 func discoverSSHKeys() []string {
 	var keyPaths []string
-	
+
 	currentUser, err := user.Current()
 	if err != nil {
 		return keyPaths
 	}
-	
+
 	sshDir := filepath.Join(currentUser.HomeDir, ".ssh")
 	commonKeys := []string{
 		"id_rsa",
@@ -71,14 +71,14 @@ func discoverSSHKeys() []string {
 		"azure_key",
 		"azure_rsa",
 	}
-	
+
 	for _, keyName := range commonKeys {
 		keyPath := filepath.Join(sshDir, keyName)
 		if _, err := os.Stat(keyPath); err == nil {
 			keyPaths = append(keyPaths, keyPath)
 		}
 	}
-	
+
 	return keyPaths
 }
 
@@ -87,13 +87,13 @@ func (sm *SSHManager) AddKeyPath(keyPath string) error {
 	if _, err := os.Stat(keyPath); err != nil {
 		return fmt.Errorf("SSH key not found: %s", keyPath)
 	}
-	
+
 	for _, existing := range sm.keyPaths {
 		if existing == keyPath {
 			return nil // Already exists
 		}
 	}
-	
+
 	sm.keyPaths = append(sm.keyPaths, keyPath)
 	return nil
 }
@@ -101,7 +101,7 @@ func (sm *SSHManager) AddKeyPath(keyPath string) error {
 // Connect establishes an SSH connection to a VM
 func (sm *SSHManager) Connect(ctx context.Context, host, username string, keyPath ...string) (*SSHConnection, error) {
 	connectionKey := fmt.Sprintf("%s@%s", username, host)
-	
+
 	// Check if connection already exists and is still valid
 	if existing, exists := sm.connections[connectionKey]; exists {
 		if sm.isConnectionAlive(existing) {
@@ -110,13 +110,13 @@ func (sm *SSHManager) Connect(ctx context.Context, host, username string, keyPat
 		// Remove stale connection
 		delete(sm.connections, connectionKey)
 	}
-	
+
 	// Determine which keys to try
 	keysToTry := sm.keyPaths
 	if len(keyPath) > 0 && keyPath[0] != "" {
 		keysToTry = []string{keyPath[0]}
 	}
-	
+
 	var lastErr error
 	for _, kp := range keysToTry {
 		client, err := sm.connectWithKey(ctx, host, username, kp)
@@ -124,7 +124,7 @@ func (sm *SSHManager) Connect(ctx context.Context, host, username string, keyPat
 			lastErr = err
 			continue
 		}
-		
+
 		connection := &SSHConnection{
 			Client:   client,
 			Host:     host,
@@ -132,11 +132,11 @@ func (sm *SSHManager) Connect(ctx context.Context, host, username string, keyPat
 			KeyPath:  kp,
 			ConnTime: time.Now(),
 		}
-		
+
 		sm.connections[connectionKey] = connection
 		return connection, nil
 	}
-	
+
 	return nil, fmt.Errorf("failed to connect with any available keys: %v", lastErr)
 }
 
@@ -147,13 +147,13 @@ func (sm *SSHManager) connectWithKey(ctx context.Context, host, username, keyPat
 	if err != nil {
 		return nil, fmt.Errorf("failed to read SSH key %s: %v", keyPath, err)
 	}
-	
+
 	// Parse private key
 	signer, err := ssh.ParsePrivateKey(keyData)
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse SSH key %s: %v", keyPath, err)
 	}
-	
+
 	// Configure SSH client
 	config := &ssh.ClientConfig{
 		User: username,
@@ -163,26 +163,26 @@ func (sm *SSHManager) connectWithKey(ctx context.Context, host, username, keyPat
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(), // Note: In production, implement proper host key verification
 		Timeout:         sm.timeout,
 	}
-	
+
 	// Add port if not specified
 	if !strings.Contains(host, ":") {
 		host = host + ": 22"
 	}
-	
+
 	// Create connection with context
 	dialer := &net.Dialer{}
 	conn, err := dialer.DialContext(ctx, "tcp", host)
 	if err != nil {
 		return nil, fmt.Errorf("failed to dial %s: %v", host, err)
 	}
-	
+
 	// Perform SSH handshake
 	c, chans, reqs, err := ssh.NewClientConn(conn, host, config)
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("SSH handshake failed: %v", err)
 	}
-	
+
 	return ssh.NewClient(c, chans, reqs), nil
 }
 
@@ -192,22 +192,22 @@ func (sm *SSHManager) ExecuteCommand(ctx context.Context, host, username, comman
 	if err != nil {
 		return "", err
 	}
-	
+
 	session, err := conn.Client.NewSession()
 	if err != nil {
 		return "", fmt.Errorf("failed to create session: %v", err)
 	}
 	defer session.Close()
-	
+
 	// Set up context cancellation
 	done := make(chan error, 1)
 	var output []byte
-	
+
 	go func() {
 		output, err = session.CombinedOutput(command)
 		done <- err
 	}()
-	
+
 	select {
 	case err := <-done:
 		if err != nil {
@@ -228,17 +228,17 @@ func (sm *SSHManager) StartInteractiveSession(ctx context.Context, host, usernam
 	if err != nil {
 		return err
 	}
-	
+
 	// Use system SSH client for interactive sessions
-	sshCmd := exec.CommandContext(ctx, "ssh", 
+	sshCmd := exec.CommandContext(ctx, "ssh",
 		"-i", conn.KeyPath,
 		"-o", "StrictHostKeyChecking=no",
 		fmt.Sprintf("%s@%s", username, conn.Host))
-	
+
 	sshCmd.Stdin = os.Stdin
 	sshCmd.Stdout = os.Stdout
 	sshCmd.Stderr = os.Stderr
-	
+
 	return sshCmd.Run()
 }
 
@@ -251,11 +251,11 @@ func (sm *SSHManager) ConnectViaBastion(ctx context.Context, resourceGroupName, 
 		"--target-resource-id", vmName,
 		"--auth-type", "ssh-key",
 		"--username", username)
-	
+
 	cmd.Stdin = os.Stdin
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	
+
 	return cmd.Run()
 }
 
@@ -264,21 +264,21 @@ func (sm *SSHManager) isConnectionAlive(conn *SSHConnection) bool {
 	if conn == nil || conn.Client == nil {
 		return false
 	}
-	
+
 	// Try to create a session to test the connection
 	session, err := conn.Client.NewSession()
 	if err != nil {
 		return false
 	}
 	session.Close()
-	
+
 	return true
 }
 
 // GetActiveConnections returns all active SSH connections
 func (sm *SSHManager) GetActiveConnections() map[string]*SSHConnection {
 	activeConns := make(map[string]*SSHConnection)
-	
+
 	for key, conn := range sm.connections {
 		if sm.isConnectionAlive(conn) {
 			activeConns[key] = conn
@@ -287,14 +287,14 @@ func (sm *SSHManager) GetActiveConnections() map[string]*SSHConnection {
 			delete(sm.connections, key)
 		}
 	}
-	
+
 	return activeConns
 }
 
 // CloseConnection closes a specific SSH connection
 func (sm *SSHManager) CloseConnection(host, username string) error {
 	connectionKey := fmt.Sprintf("%s@%s", username, host)
-	
+
 	if conn, exists := sm.connections[connectionKey]; exists {
 		if conn.Client != nil {
 			err := conn.Client.Close()
@@ -303,14 +303,14 @@ func (sm *SSHManager) CloseConnection(host, username string) error {
 		}
 		delete(sm.connections, connectionKey)
 	}
-	
+
 	return nil
 }
 
 // CloseAllConnections closes all active SSH connections
 func (sm *SSHManager) CloseAllConnections() error {
 	var lastErr error
-	
+
 	for key, conn := range sm.connections {
 		if conn.Client != nil {
 			if err := conn.Client.Close(); err != nil {
@@ -319,7 +319,7 @@ func (sm *SSHManager) CloseAllConnections() error {
 		}
 		delete(sm.connections, key)
 	}
-	
+
 	return lastErr
 }
 
